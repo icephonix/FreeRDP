@@ -23,6 +23,7 @@
 #include <freerdp/config.h>
 
 #include <winpr/crt.h>
+#include <winpr/wtsapi.h>
 #include <winpr/string.h>
 #include <winpr/windows.h>
 
@@ -136,7 +137,7 @@ static void printer_win_close_printjob(rdpPrintJob* printjob)
 	{
 	}
 
-	if (!ClosePrinter(win_printer->hPrinter))
+	if (!EndDocPrinter(win_printer->hPrinter))
 	{
 	}
 
@@ -207,6 +208,9 @@ static void printer_win_free_printer(rdpPrinter* printer)
 
 	if (win_printer->printjob)
 		win_printer->printjob->printjob.Close((rdpPrintJob*)win_printer->printjob);
+
+	if (win_printer->hPrinter)
+		ClosePrinter(win_printer->hPrinter);
 
 	if (printer->backend)
 		printer->backend->ReleaseRef(printer->backend);
@@ -313,7 +317,6 @@ static rdpPrinter** printer_win_enum_printers(rdpPrinterDriver* driver)
 {
 	rdpPrinter** printers;
 	int num_printers;
-	int i;
 	PRINTER_INFO_2* prninfo = NULL;
 	DWORD needed, returned;
 	BOOL haveDefault = FALSE;
@@ -359,7 +362,7 @@ static rdpPrinter** printer_win_enum_printers(rdpPrinterDriver* driver)
 
 	num_printers = 0;
 
-	for (i = 0; i < (int)returned; i++)
+	for (int i = 0; i < (int)returned; i++)
 	{
 		rdpPrinter* current = printers[num_printers];
 		current = printer_win_new_printer((rdpWinPrinterDriver*)driver, prninfo[i].pPrinterName,
@@ -434,14 +437,18 @@ static void printer_win_release_ref_driver(rdpPrinterDriver* driver)
 		win->references--;
 }
 
-rdpPrinterDriver* win_freerdp_printer_client_subsystem_entry(void)
+FREERDP_ENTRY_POINT(UINT VCAPITYPE win_freerdp_printer_client_subsystem_entry(void* arg))
 {
+	rdpPrinterDriver** ppPrinter = (rdpPrinterDriver**)arg;
+	if (!ppPrinter)
+		return ERROR_INVALID_PARAMETER;
+
 	if (!win_driver)
 	{
 		win_driver = (rdpWinPrinterDriver*)calloc(1, sizeof(rdpWinPrinterDriver));
 
 		if (!win_driver)
-			return NULL;
+			return ERROR_OUTOFMEMORY;
 
 		win_driver->driver.EnumPrinters = printer_win_enum_printers;
 		win_driver->driver.ReleaseEnumPrinters = printer_win_release_enum_printers;
@@ -455,5 +462,6 @@ rdpPrinterDriver* win_freerdp_printer_client_subsystem_entry(void)
 
 	win_driver->driver.AddRef(&win_driver->driver);
 
-	return &win_driver->driver;
+	*ppPrinter = &win_driver->driver;
+	return CHANNEL_RC_OK;
 }

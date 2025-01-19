@@ -24,6 +24,7 @@
 #include <freerdp/config.h>
 
 #include <winpr/assert.h>
+#include <winpr/cast.h>
 
 #include <winpr/crt.h>
 #include <winpr/wlog.h>
@@ -47,7 +48,7 @@
 
 static BOOL delete_surface(const void* key, void* value, void* arg)
 {
-	const UINT16 id = (UINT16)(key);
+	const UINT16 id = (UINT16)(uintptr_t)(key);
 	RdpgfxClientContext* context = arg;
 	RDPGFX_DELETE_SURFACE_PDU pdu = { 0 };
 
@@ -74,15 +75,13 @@ static void free_surfaces(RdpgfxClientContext* context, wHashTable* SurfaceTable
 
 static void evict_cache_slots(RdpgfxClientContext* context, UINT16 MaxCacheSlots, void** CacheSlots)
 {
-	UINT16 index;
-
 	WINPR_ASSERT(CacheSlots);
-	for (index = 0; index < MaxCacheSlots; index++)
+	for (UINT16 index = 0; index < MaxCacheSlots; index++)
 	{
 		if (CacheSlots[index])
 		{
 			RDPGFX_EVICT_CACHE_ENTRY_PDU pdu = { 0 };
-			pdu.cacheSlot = (UINT16)index + 1;
+			pdu.cacheSlot = index + 1;
 
 			if (context && context->EvictCacheEntry)
 			{
@@ -103,11 +102,10 @@ static UINT rdpgfx_send_caps_advertise_pdu(RdpgfxClientContext* context,
                                            const RDPGFX_CAPS_ADVERTISE_PDU* pdu)
 {
 	UINT error = CHANNEL_RC_OK;
-	UINT16 index;
 	RDPGFX_HEADER header = { 0 };
-	RDPGFX_PLUGIN* gfx;
-	GENERIC_CHANNEL_CALLBACK* callback;
-	wStream* s;
+	RDPGFX_PLUGIN* gfx = NULL;
+	GENERIC_CHANNEL_CALLBACK* callback = NULL;
+	wStream* s = NULL;
 
 	WINPR_ASSERT(pdu);
 	WINPR_ASSERT(context);
@@ -123,7 +121,7 @@ static UINT rdpgfx_send_caps_advertise_pdu(RdpgfxClientContext* context,
 	header.cmdId = RDPGFX_CMDID_CAPSADVERTISE;
 	header.pduLength = RDPGFX_HEADER_SIZE + 2;
 
-	for (index = 0; index < pdu->capsSetCount; index++)
+	for (UINT16 index = 0; index < pdu->capsSetCount; index++)
 	{
 		const RDPGFX_CAPSET* capsSet = &(pdu->capsSets[index]);
 		header.pduLength += RDPGFX_CAPSET_BASE_SIZE + capsSet->length;
@@ -144,9 +142,13 @@ static UINT rdpgfx_send_caps_advertise_pdu(RdpgfxClientContext* context,
 	/* RDPGFX_CAPS_ADVERTISE_PDU */
 	Stream_Write_UINT16(s, pdu->capsSetCount); /* capsSetCount (2 bytes) */
 
-	for (index = 0; index < pdu->capsSetCount; index++)
+	for (UINT16 index = 0; index < pdu->capsSetCount; index++)
 	{
 		const RDPGFX_CAPSET* capsSet = &(pdu->capsSets[index]);
+
+		DEBUG_RDPGFX(gfx->log, "Sending %s [0x%08" PRIx32 "] flags=0x%08" PRIx32,
+		             rdpgfx_caps_version_str(capsSet->version), capsSet->version, capsSet->flags);
+
 		Stream_Write_UINT32(s, capsSet->version); /* version (4 bytes) */
 		Stream_Write_UINT32(s, capsSet->length);  /* capsDataLength (4 bytes) */
 		Stream_Write_UINT32(s, capsSet->flags);   /* capsData (4 bytes) */
@@ -172,9 +174,8 @@ static BOOL rdpgfx_is_capability_filtered(RDPGFX_PLUGIN* gfx, UINT32 caps)
 		                       RDPGFX_CAPVERSION_104, RDPGFX_CAPVERSION_105,
 		                       RDPGFX_CAPVERSION_106, RDPGFX_CAPVERSION_106_ERR,
 		                       RDPGFX_CAPVERSION_107 };
-	UINT32 x;
 
-	for (x = 0; x < ARRAYSIZE(capList); x++)
+	for (size_t x = 0; x < ARRAYSIZE(capList); x++)
 	{
 		if (caps == capList[x])
 			return (filter & (1 << x)) != 0;
@@ -190,9 +191,9 @@ static BOOL rdpgfx_is_capability_filtered(RDPGFX_PLUGIN* gfx, UINT32 caps)
  */
 static UINT rdpgfx_send_supported_caps(GENERIC_CHANNEL_CALLBACK* callback)
 {
-	RDPGFX_PLUGIN* gfx;
-	RdpgfxClientContext* context;
-	RDPGFX_CAPSET* capsSet;
+	RDPGFX_PLUGIN* gfx = NULL;
+	RdpgfxClientContext* context = NULL;
+	RDPGFX_CAPSET* capsSet = NULL;
 	RDPGFX_CAPSET capsSets[RDPGFX_NUMBER_CAPSETS] = { 0 };
 	RDPGFX_CAPS_ADVERTISE_PDU pdu = { 0 };
 
@@ -314,6 +315,10 @@ static UINT rdpgfx_send_supported_caps(GENERIC_CHANNEL_CALLBACK* callback)
 			capsSet->flags = caps10Flags;
 		}
 
+		/* The following capabilities expect support for image scaling.
+		 * Disable these for builds that do not have support for that.
+		 */
+#if defined(WITH_CAIRO) || defined(WITH_SWSCALE)
 		if (!rdpgfx_is_capability_filtered(gfx, RDPGFX_CAPVERSION_105))
 		{
 			capsSet = &capsSets[pdu.capsSetCount++];
@@ -337,6 +342,7 @@ static UINT rdpgfx_send_supported_caps(GENERIC_CHANNEL_CALLBACK* callback)
 			capsSet->length = 0x4;
 			capsSet->flags = caps10Flags;
 		}
+#endif
 
 		if (!rdpgfx_is_capability_filtered(gfx, RDPGFX_CAPVERSION_107))
 		{
@@ -376,9 +382,11 @@ static UINT rdpgfx_recv_caps_confirm_pdu(GENERIC_CHANNEL_CALLBACK* callback, wSt
 	Stream_Read_UINT32(s, capsSet.version); /* version (4 bytes) */
 	Stream_Read_UINT32(s, capsSet.length);  /* capsDataLength (4 bytes) */
 	Stream_Read_UINT32(s, capsSet.flags);   /* capsData (4 bytes) */
+	gfx->TotalDecodedFrames = 0;
 	gfx->ConnectionCaps = capsSet;
-	DEBUG_RDPGFX(gfx->log, "RecvCapsConfirmPdu: version: 0x%08" PRIX32 " flags: 0x%08" PRIX32 "",
-	             capsSet.version, capsSet.flags);
+	DEBUG_RDPGFX(gfx->log,
+	             "RecvCapsConfirmPdu: version: %s [0x%08" PRIX32 "] flags: 0x%08" PRIX32 "",
+	             rdpgfx_caps_version_str(capsSet.version), capsSet.version, capsSet.flags);
 
 	if (!context)
 		return ERROR_BAD_CONFIGURATION;
@@ -394,11 +402,11 @@ static UINT rdpgfx_recv_caps_confirm_pdu(GENERIC_CHANNEL_CALLBACK* callback, wSt
 static UINT rdpgfx_send_frame_acknowledge_pdu(RdpgfxClientContext* context,
                                               const RDPGFX_FRAME_ACKNOWLEDGE_PDU* pdu)
 {
-	UINT error;
-	wStream* s;
+	UINT error = 0;
+	wStream* s = NULL;
 	RDPGFX_HEADER header = { 0 };
-	RDPGFX_PLUGIN* gfx;
-	GENERIC_CHANNEL_CALLBACK* callback;
+	RDPGFX_PLUGIN* gfx = NULL;
+	GENERIC_CHANNEL_CALLBACK* callback = NULL;
 
 	if (!context || !pdu)
 		return ERROR_BAD_ARGUMENTS;
@@ -446,11 +454,11 @@ fail:
 static UINT rdpgfx_send_qoe_frame_acknowledge_pdu(RdpgfxClientContext* context,
                                                   const RDPGFX_QOE_FRAME_ACKNOWLEDGE_PDU* pdu)
 {
-	UINT error;
-	wStream* s;
+	UINT error = 0;
+	wStream* s = NULL;
 	RDPGFX_HEADER header = { 0 };
-	GENERIC_CHANNEL_CALLBACK* callback;
-	RDPGFX_PLUGIN* gfx;
+	GENERIC_CHANNEL_CALLBACK* callback = NULL;
+	RDPGFX_PLUGIN* gfx = NULL;
 
 	header.flags = 0;
 	header.cmdId = RDPGFX_CMDID_QOEFRAMEACKNOWLEDGE;
@@ -500,9 +508,7 @@ fail:
  */
 static UINT rdpgfx_recv_reset_graphics_pdu(GENERIC_CHANNEL_CALLBACK* callback, wStream* s)
 {
-	int pad;
-	UINT32 index;
-	MONITOR_DEF* monitor;
+	MONITOR_DEF* monitor = NULL;
 	RDPGFX_RESET_GRAPHICS_PDU pdu = { 0 };
 	WINPR_ASSERT(callback);
 
@@ -521,7 +527,7 @@ static UINT rdpgfx_recv_reset_graphics_pdu(GENERIC_CHANNEL_CALLBACK* callback, w
 	Stream_Read_UINT32(s, pdu.height);       /* height (4 bytes) */
 	Stream_Read_UINT32(s, pdu.monitorCount); /* monitorCount (4 bytes) */
 
-	if (!Stream_CheckAndLogRequiredLength(TAG, s, 20ull * pdu.monitorCount))
+	if (!Stream_CheckAndLogRequiredLengthOfSize(TAG, s, pdu.monitorCount, 20ull))
 		return ERROR_INVALID_DATA;
 
 	pdu.monitorDefArray = (MONITOR_DEF*)calloc(pdu.monitorCount, sizeof(MONITOR_DEF));
@@ -532,7 +538,7 @@ static UINT rdpgfx_recv_reset_graphics_pdu(GENERIC_CHANNEL_CALLBACK* callback, w
 		return CHANNEL_RC_NO_MEMORY;
 	}
 
-	for (index = 0; index < pdu.monitorCount; index++)
+	for (UINT32 index = 0; index < pdu.monitorCount; index++)
 	{
 		monitor = &(pdu.monitorDefArray[index]);
 		Stream_Read_INT32(s, monitor->left);   /* left (4 bytes) */
@@ -542,7 +548,13 @@ static UINT rdpgfx_recv_reset_graphics_pdu(GENERIC_CHANNEL_CALLBACK* callback, w
 		Stream_Read_UINT32(s, monitor->flags); /* flags (4 bytes) */
 	}
 
-	pad = 340 - (RDPGFX_HEADER_SIZE + 12 + (pdu.monitorCount * 20));
+	const size_t size = (RDPGFX_HEADER_SIZE + 12ULL + (pdu.monitorCount * 20ULL));
+	if (size > 340)
+	{
+		free(pdu.monitorDefArray);
+		return CHANNEL_RC_NULL_DATA;
+	}
+	const size_t pad = 340ULL - size;
 
 	if (!Stream_CheckAndLogRequiredLength(TAG, s, (size_t)pad))
 	{
@@ -556,7 +568,7 @@ static UINT rdpgfx_recv_reset_graphics_pdu(GENERIC_CHANNEL_CALLBACK* callback, w
 	             pdu.width, pdu.height, pdu.monitorCount);
 
 #if defined(WITH_DEBUG_RDPGFX)
-	for (index = 0; index < pdu.monitorCount; index++)
+	for (UINT32 index = 0; index < pdu.monitorCount; index++)
 	{
 		monitor = &(pdu.monitorDefArray[index]);
 		DEBUG_RDPGFX(gfx->log,
@@ -624,7 +636,7 @@ static UINT rdpgfx_recv_evict_cache_entry_pdu(GENERIC_CHANNEL_CALLBACK* callback
  */
 static UINT rdpgfx_load_cache_import_offer(RDPGFX_PLUGIN* gfx, RDPGFX_CACHE_IMPORT_OFFER_PDU* offer)
 {
-	int idx, count;
+	int count = 0;
 	UINT error = CHANNEL_RC_OK;
 	PERSISTENT_CACHE_ENTRY entry;
 	rdpPersistentCache* persistent = NULL;
@@ -637,10 +649,12 @@ static UINT rdpgfx_load_cache_import_offer(RDPGFX_PLUGIN* gfx, RDPGFX_CACHE_IMPO
 
 	offer->cacheEntriesCount = 0;
 
-	if (!settings->BitmapCachePersistEnabled)
+	if (!freerdp_settings_get_bool(settings, FreeRDP_BitmapCachePersistEnabled))
 		return CHANNEL_RC_OK;
 
-	if (!settings->BitmapCachePersistFile)
+	const char* BitmapCachePersistFile =
+	    freerdp_settings_get_string(settings, FreeRDP_BitmapCachePersistFile);
+	if (!BitmapCachePersistFile)
 		return CHANNEL_RC_OK;
 
 	persistent = persistent_cache_new();
@@ -648,7 +662,7 @@ static UINT rdpgfx_load_cache_import_offer(RDPGFX_PLUGIN* gfx, RDPGFX_CACHE_IMPO
 	if (!persistent)
 		return CHANNEL_RC_NO_MEMORY;
 
-	if (persistent_cache_open(persistent, settings->BitmapCachePersistFile, FALSE, 3) < 1)
+	if (persistent_cache_open(persistent, BitmapCachePersistFile, FALSE, 3) < 1)
 	{
 		error = CHANNEL_RC_INITIALIZATION_ERROR;
 		goto fail;
@@ -676,7 +690,7 @@ static UINT rdpgfx_load_cache_import_offer(RDPGFX_PLUGIN* gfx, RDPGFX_CACHE_IMPO
 
 	offer->cacheEntriesCount = (UINT16)count;
 
-	for (idx = 0; idx < count; idx++)
+	for (int idx = 0; idx < count; idx++)
 	{
 		if (persistent_cache_read_entry(persistent, &entry) < 1)
 		{
@@ -703,7 +717,6 @@ fail:
  */
 static UINT rdpgfx_save_persistent_cache(RDPGFX_PLUGIN* gfx)
 {
-	int idx;
 	UINT error = CHANNEL_RC_OK;
 	PERSISTENT_CACHE_ENTRY cacheEntry;
 	rdpPersistentCache* persistent = NULL;
@@ -715,10 +728,12 @@ static UINT rdpgfx_save_persistent_cache(RDPGFX_PLUGIN* gfx)
 	WINPR_ASSERT(context);
 	WINPR_ASSERT(settings);
 
-	if (!settings->BitmapCachePersistEnabled)
+	if (!freerdp_settings_get_bool(settings, FreeRDP_BitmapCachePersistEnabled))
 		return CHANNEL_RC_OK;
 
-	if (!settings->BitmapCachePersistFile)
+	const char* BitmapCachePersistFile =
+	    freerdp_settings_get_string(settings, FreeRDP_BitmapCachePersistFile);
+	if (!BitmapCachePersistFile)
 		return CHANNEL_RC_OK;
 
 	if (!context->ExportCacheEntry)
@@ -729,17 +744,17 @@ static UINT rdpgfx_save_persistent_cache(RDPGFX_PLUGIN* gfx)
 	if (!persistent)
 		return CHANNEL_RC_NO_MEMORY;
 
-	if (persistent_cache_open(persistent, settings->BitmapCachePersistFile, TRUE, 3) < 1)
+	if (persistent_cache_open(persistent, BitmapCachePersistFile, TRUE, 3) < 1)
 	{
 		error = CHANNEL_RC_INITIALIZATION_ERROR;
 		goto fail;
 	}
 
-	for (idx = 0; idx < gfx->MaxCacheSlots; idx++)
+	for (UINT16 idx = 0; idx < gfx->MaxCacheSlots; idx++)
 	{
 		if (gfx->CacheSlots[idx])
 		{
-			UINT16 cacheSlot = (UINT16)idx;
+			UINT16 cacheSlot = idx;
 
 			if (context->ExportCacheEntry(context, cacheSlot, &cacheEntry) != CHANNEL_RC_OK)
 				continue;
@@ -764,18 +779,15 @@ fail:
 static UINT rdpgfx_send_cache_import_offer_pdu(RdpgfxClientContext* context,
                                                const RDPGFX_CACHE_IMPORT_OFFER_PDU* pdu)
 {
-	UINT16 index;
 	UINT error = CHANNEL_RC_OK;
-	wStream* s;
+	wStream* s = NULL;
 	RDPGFX_HEADER header;
-	GENERIC_CHANNEL_CALLBACK* callback;
-	WINPR_ASSERT(context);
-	RDPGFX_PLUGIN* gfx = (RDPGFX_PLUGIN*)context->handle;
+	GENERIC_CHANNEL_CALLBACK* callback = NULL;
 
 	if (!context || !pdu)
 		return ERROR_BAD_ARGUMENTS;
 
-	gfx = (RDPGFX_PLUGIN*)context->handle;
+	RDPGFX_PLUGIN* gfx = (RDPGFX_PLUGIN*)context->handle;
 
 	if (!gfx || !gfx->base.listener_callback)
 		return ERROR_BAD_CONFIGURATION;
@@ -787,7 +799,7 @@ static UINT rdpgfx_send_cache_import_offer_pdu(RdpgfxClientContext* context,
 
 	header.flags = 0;
 	header.cmdId = RDPGFX_CMDID_CACHEIMPORTOFFER;
-	header.pduLength = RDPGFX_HEADER_SIZE + 2 + pdu->cacheEntriesCount * 12;
+	header.pduLength = RDPGFX_HEADER_SIZE + 2ul + pdu->cacheEntriesCount * 12ul;
 	DEBUG_RDPGFX(gfx->log, "SendCacheImportOfferPdu: cacheEntriesCount: %" PRIu16 "",
 	             pdu->cacheEntriesCount);
 	s = Stream_New(NULL, header.pduLength);
@@ -811,7 +823,7 @@ static UINT rdpgfx_send_cache_import_offer_pdu(RdpgfxClientContext* context,
 	/* cacheEntriesCount (2 bytes) */
 	Stream_Write_UINT16(s, pdu->cacheEntriesCount);
 
-	for (index = 0; index < pdu->cacheEntriesCount; index++)
+	for (UINT16 index = 0; index < pdu->cacheEntriesCount; index++)
 	{
 		const RDPGFX_CACHE_ENTRY_METADATA* cacheEntry = &(pdu->cacheEntries[index]);
 		Stream_Write_UINT64(s, cacheEntry->cacheKey);     /* cacheKey (8 bytes) */
@@ -833,10 +845,10 @@ fail:
  */
 static UINT rdpgfx_send_cache_offer(RDPGFX_PLUGIN* gfx)
 {
-	int idx, count;
+	int count = 0;
 	UINT error = CHANNEL_RC_OK;
 	PERSISTENT_CACHE_ENTRY entry;
-	RDPGFX_CACHE_IMPORT_OFFER_PDU offer = { 0 };
+	RDPGFX_CACHE_IMPORT_OFFER_PDU* offer = NULL;
 	rdpPersistentCache* persistent = NULL;
 
 	WINPR_ASSERT(gfx);
@@ -845,10 +857,12 @@ static UINT rdpgfx_send_cache_offer(RDPGFX_PLUGIN* gfx)
 	RdpgfxClientContext* context = gfx->context;
 	rdpSettings* settings = gfx->rdpcontext->settings;
 
-	if (!settings->BitmapCachePersistEnabled)
+	if (!freerdp_settings_get_bool(settings, FreeRDP_BitmapCachePersistEnabled))
 		return CHANNEL_RC_OK;
 
-	if (!settings->BitmapCachePersistFile)
+	const char* BitmapCachePersistFile =
+	    freerdp_settings_get_string(settings, FreeRDP_BitmapCachePersistFile);
+	if (!BitmapCachePersistFile)
 		return CHANNEL_RC_OK;
 
 	persistent = persistent_cache_new();
@@ -856,7 +870,7 @@ static UINT rdpgfx_send_cache_offer(RDPGFX_PLUGIN* gfx)
 	if (!persistent)
 		return CHANNEL_RC_NO_MEMORY;
 
-	if (persistent_cache_open(persistent, settings->BitmapCachePersistFile, FALSE, 3) < 1)
+	if (persistent_cache_open(persistent, BitmapCachePersistFile, FALSE, 3) < 1)
 	{
 		error = CHANNEL_RC_INITIALIZATION_ERROR;
 		goto fail;
@@ -869,6 +883,11 @@ static UINT rdpgfx_send_cache_offer(RDPGFX_PLUGIN* gfx)
 	}
 
 	count = persistent_cache_get_count(persistent);
+	if (count < 0)
+	{
+		error = ERROR_INVALID_DATA;
+		goto fail;
+	}
 
 	if (count >= RDPGFX_CACHE_ENTRY_MAX_COUNT)
 		count = RDPGFX_CACHE_ENTRY_MAX_COUNT - 1;
@@ -876,11 +895,19 @@ static UINT rdpgfx_send_cache_offer(RDPGFX_PLUGIN* gfx)
 	if (count > gfx->MaxCacheSlots)
 		count = gfx->MaxCacheSlots;
 
-	offer.cacheEntriesCount = (UINT16)count;
+	offer = (RDPGFX_CACHE_IMPORT_OFFER_PDU*)calloc(1, sizeof(RDPGFX_CACHE_IMPORT_OFFER_PDU));
+	if (!offer)
+	{
+		error = CHANNEL_RC_NO_MEMORY;
+		goto fail;
+	}
+
+	WINPR_ASSERT(count <= UINT16_MAX);
+	offer->cacheEntriesCount = (UINT16)count;
 
 	WLog_DBG(TAG, "Sending Cache Import Offer: %d", count);
 
-	for (idx = 0; idx < count; idx++)
+	for (int idx = 0; idx < count; idx++)
 	{
 		if (persistent_cache_read_entry(persistent, &entry) < 1)
 		{
@@ -888,15 +915,13 @@ static UINT rdpgfx_send_cache_offer(RDPGFX_PLUGIN* gfx)
 			goto fail;
 		}
 
-		offer.cacheEntries[idx].cacheKey = entry.key64;
-		offer.cacheEntries[idx].bitmapLength = entry.size;
+		offer->cacheEntries[idx].cacheKey = entry.key64;
+		offer->cacheEntries[idx].bitmapLength = entry.size;
 	}
 
-	persistent_cache_free(persistent);
-
-	if (offer.cacheEntriesCount > 0)
+	if (offer->cacheEntriesCount > 0)
 	{
-		error = rdpgfx_send_cache_import_offer_pdu(context, &offer);
+		error = rdpgfx_send_cache_import_offer_pdu(context, offer);
 		if (error != CHANNEL_RC_OK)
 		{
 			WLog_Print(gfx->log, WLOG_ERROR, "Failed to send cache import offer PDU");
@@ -904,9 +929,9 @@ static UINT rdpgfx_send_cache_offer(RDPGFX_PLUGIN* gfx)
 		}
 	}
 
-	return error;
 fail:
 	persistent_cache_free(persistent);
+	free(offer);
 	return error;
 }
 
@@ -915,13 +940,11 @@ fail:
  *
  * @return 0 on success, otherwise a Win32 error code
  */
-static UINT rdpgfx_load_cache_import_reply(RDPGFX_PLUGIN* gfx, RDPGFX_CACHE_IMPORT_REPLY_PDU* reply)
+static UINT rdpgfx_load_cache_import_reply(RDPGFX_PLUGIN* gfx,
+                                           const RDPGFX_CACHE_IMPORT_REPLY_PDU* reply)
 {
-	int idx;
-	int count;
-	UINT16 cacheSlot;
+	int count = 0;
 	UINT error = CHANNEL_RC_OK;
-	PERSISTENT_CACHE_ENTRY entry;
 	rdpPersistentCache* persistent = NULL;
 	WINPR_ASSERT(gfx);
 	WINPR_ASSERT(gfx->rdpcontext);
@@ -930,10 +953,12 @@ static UINT rdpgfx_load_cache_import_reply(RDPGFX_PLUGIN* gfx, RDPGFX_CACHE_IMPO
 
 	WINPR_ASSERT(settings);
 	WINPR_ASSERT(reply);
-	if (!settings->BitmapCachePersistEnabled)
+	if (!freerdp_settings_get_bool(settings, FreeRDP_BitmapCachePersistEnabled))
 		return CHANNEL_RC_OK;
 
-	if (!settings->BitmapCachePersistFile)
+	const char* BitmapCachePersistFile =
+	    freerdp_settings_get_string(settings, FreeRDP_BitmapCachePersistFile);
+	if (!BitmapCachePersistFile)
 		return CHANNEL_RC_OK;
 
 	persistent = persistent_cache_new();
@@ -941,7 +966,7 @@ static UINT rdpgfx_load_cache_import_reply(RDPGFX_PLUGIN* gfx, RDPGFX_CACHE_IMPO
 	if (!persistent)
 		return CHANNEL_RC_NO_MEMORY;
 
-	if (persistent_cache_open(persistent, settings->BitmapCachePersistFile, FALSE, 3) < 1)
+	if (persistent_cache_open(persistent, BitmapCachePersistFile, FALSE, 3) < 1)
 	{
 		error = CHANNEL_RC_INITIALIZATION_ERROR;
 		goto fail;
@@ -959,16 +984,16 @@ static UINT rdpgfx_load_cache_import_reply(RDPGFX_PLUGIN* gfx, RDPGFX_CACHE_IMPO
 
 	WLog_DBG(TAG, "Receiving Cache Import Reply: %d", count);
 
-	for (idx = 0; idx < count; idx++)
+	for (int idx = 0; idx < count; idx++)
 	{
+		PERSISTENT_CACHE_ENTRY entry = { 0 };
 		if (persistent_cache_read_entry(persistent, &entry) < 1)
 		{
 			error = ERROR_INVALID_DATA;
 			goto fail;
 		}
 
-		cacheSlot = reply->cacheSlots[idx];
-
+		const UINT16 cacheSlot = reply->cacheSlots[idx];
 		if (context && context->ImportCacheEntry)
 			context->ImportCacheEntry(context, cacheSlot, &entry);
 	}
@@ -988,8 +1013,7 @@ fail:
  */
 static UINT rdpgfx_recv_cache_import_reply_pdu(GENERIC_CHANNEL_CALLBACK* callback, wStream* s)
 {
-	UINT16 idx;
-	RDPGFX_CACHE_IMPORT_REPLY_PDU pdu;
+	RDPGFX_CACHE_IMPORT_REPLY_PDU pdu = { 0 };
 	WINPR_ASSERT(callback);
 	RDPGFX_PLUGIN* gfx = (RDPGFX_PLUGIN*)callback->plugin;
 	WINPR_ASSERT(gfx);
@@ -1001,13 +1025,13 @@ static UINT rdpgfx_recv_cache_import_reply_pdu(GENERIC_CHANNEL_CALLBACK* callbac
 
 	Stream_Read_UINT16(s, pdu.importedEntriesCount); /* cacheSlot (2 bytes) */
 
-	if (!Stream_CheckAndLogRequiredLength(TAG, s, 2ull * pdu.importedEntriesCount))
+	if (!Stream_CheckAndLogRequiredLengthOfSize(TAG, s, pdu.importedEntriesCount, 2ull))
 		return ERROR_INVALID_DATA;
 
 	if (pdu.importedEntriesCount > RDPGFX_CACHE_ENTRY_MAX_COUNT)
 		return ERROR_INVALID_DATA;
 
-	for (idx = 0; idx < pdu.importedEntriesCount; idx++)
+	for (UINT16 idx = 0; idx < pdu.importedEntriesCount; idx++)
 	{
 		Stream_Read_UINT16(s, pdu.cacheSlots[idx]); /* cacheSlot (2 bytes) */
 	}
@@ -1170,6 +1194,7 @@ static UINT rdpgfx_recv_end_frame_pdu(GENERIC_CHANNEL_CALLBACK* callback, wStrea
 	Stream_Read_UINT32(s, pdu.frameId); /* frameId (4 bytes) */
 	DEBUG_RDPGFX(gfx->log, "RecvEndFramePdu: frameId: %" PRIu32 "", pdu.frameId);
 
+	const UINT64 start = GetTickCount64();
 	if (context)
 	{
 		IFCALLRET(context->EndFrame, error, context, &pdu);
@@ -1181,7 +1206,8 @@ static UINT rdpgfx_recv_end_frame_pdu(GENERIC_CHANNEL_CALLBACK* callback, wStrea
 			return error;
 		}
 	}
-
+	const UINT64 end = GetTickCount64();
+	const UINT64 EndFrameTime = end - start;
 	gfx->TotalDecodedFrames++;
 
 	if (!gfx->sendFrameAcks)
@@ -1221,16 +1247,16 @@ static UINT rdpgfx_recv_end_frame_pdu(GENERIC_CHANNEL_CALLBACK* callback, wStrea
 		case RDPGFX_CAPVERSION_107:
 			if (freerdp_settings_get_bool(gfx->rdpcontext->settings, FreeRDP_GfxSendQoeAck))
 			{
-				RDPGFX_QOE_FRAME_ACKNOWLEDGE_PDU qoe;
+				RDPGFX_QOE_FRAME_ACKNOWLEDGE_PDU qoe = { 0 };
 				UINT64 diff = (GetTickCount64() - gfx->StartDecodingTime);
 
 				if (diff > 65000)
 					diff = 0;
 
 				qoe.frameId = pdu.frameId;
-				qoe.timestamp = gfx->StartDecodingTime;
-				qoe.timeDiffSE = diff;
-				qoe.timeDiffEDR = 1;
+				qoe.timestamp = gfx->StartDecodingTime % UINT32_MAX;
+				qoe.timeDiffSE = WINPR_ASSERTING_INT_CAST(UINT16, diff);
+				qoe.timeDiffEDR = WINPR_ASSERTING_INT_CAST(UINT16, EndFrameTime);
 
 				if ((error = rdpgfx_send_qoe_frame_acknowledge_pdu(context, &qoe)))
 					WLog_Print(gfx->log, WLOG_ERROR,
@@ -1259,7 +1285,7 @@ static UINT rdpgfx_recv_wire_to_surface_1_pdu(GENERIC_CHANNEL_CALLBACK* callback
 	RDPGFX_WIRE_TO_SURFACE_PDU_1 pdu = { 0 };
 	WINPR_ASSERT(callback);
 	RDPGFX_PLUGIN* gfx = (RDPGFX_PLUGIN*)callback->plugin;
-	UINT error;
+	UINT error = 0;
 
 	WINPR_ASSERT(gfx);
 	if (!Stream_CheckAndLogRequiredLength(TAG, s, RDPGFX_WIRE_TO_SURFACE_PDU_1_SIZE))
@@ -1454,14 +1480,13 @@ static UINT rdpgfx_recv_delete_encoding_context_pdu(GENERIC_CHANNEL_CALLBACK* ca
  */
 static UINT rdpgfx_recv_solid_fill_pdu(GENERIC_CHANNEL_CALLBACK* callback, wStream* s)
 {
-	UINT16 index;
-	RECTANGLE_16* fillRect;
+	RECTANGLE_16* fillRect = NULL;
 	RDPGFX_SOLID_FILL_PDU pdu = { 0 };
 	WINPR_ASSERT(callback);
 	RDPGFX_PLUGIN* gfx = (RDPGFX_PLUGIN*)callback->plugin;
 	WINPR_ASSERT(gfx);
 	RdpgfxClientContext* context = gfx->context;
-	UINT error;
+	UINT error = 0;
 
 	if (!Stream_CheckAndLogRequiredLength(TAG, s, 8))
 		return ERROR_INVALID_DATA;
@@ -1477,7 +1502,7 @@ static UINT rdpgfx_recv_solid_fill_pdu(GENERIC_CHANNEL_CALLBACK* callback, wStre
 
 	Stream_Read_UINT16(s, pdu.fillRectCount); /* fillRectCount (2 bytes) */
 
-	if (!Stream_CheckAndLogRequiredLength(TAG, s, 8ull * pdu.fillRectCount))
+	if (!Stream_CheckAndLogRequiredLengthOfSize(TAG, s, pdu.fillRectCount, 8ull))
 		return ERROR_INVALID_DATA;
 
 	pdu.fillRects = (RECTANGLE_16*)calloc(pdu.fillRectCount, sizeof(RECTANGLE_16));
@@ -1488,7 +1513,7 @@ static UINT rdpgfx_recv_solid_fill_pdu(GENERIC_CHANNEL_CALLBACK* callback, wStre
 		return CHANNEL_RC_NO_MEMORY;
 	}
 
-	for (index = 0; index < pdu.fillRectCount; index++)
+	for (UINT16 index = 0; index < pdu.fillRectCount; index++)
 	{
 		fillRect = &(pdu.fillRects[index]);
 
@@ -1523,14 +1548,13 @@ static UINT rdpgfx_recv_solid_fill_pdu(GENERIC_CHANNEL_CALLBACK* callback, wStre
  */
 static UINT rdpgfx_recv_surface_to_surface_pdu(GENERIC_CHANNEL_CALLBACK* callback, wStream* s)
 {
-	UINT16 index;
-	RDPGFX_POINT16* destPt;
+	RDPGFX_POINT16* destPt = NULL;
 	RDPGFX_SURFACE_TO_SURFACE_PDU pdu = { 0 };
 	WINPR_ASSERT(callback);
 	RDPGFX_PLUGIN* gfx = (RDPGFX_PLUGIN*)callback->plugin;
 	WINPR_ASSERT(gfx);
 	RdpgfxClientContext* context = gfx->context;
-	UINT error;
+	UINT error = 0;
 
 	if (!Stream_CheckAndLogRequiredLength(TAG, s, 14))
 		return ERROR_INVALID_DATA;
@@ -1547,7 +1571,7 @@ static UINT rdpgfx_recv_surface_to_surface_pdu(GENERIC_CHANNEL_CALLBACK* callbac
 
 	Stream_Read_UINT16(s, pdu.destPtsCount); /* destPtsCount (2 bytes) */
 
-	if (!Stream_CheckAndLogRequiredLength(TAG, s, 4ULL * pdu.destPtsCount))
+	if (!Stream_CheckAndLogRequiredLengthOfSize(TAG, s, pdu.destPtsCount, 4ull))
 		return ERROR_INVALID_DATA;
 
 	pdu.destPts = (RDPGFX_POINT16*)calloc(pdu.destPtsCount, sizeof(RDPGFX_POINT16));
@@ -1558,7 +1582,7 @@ static UINT rdpgfx_recv_surface_to_surface_pdu(GENERIC_CHANNEL_CALLBACK* callbac
 		return CHANNEL_RC_NO_MEMORY;
 	}
 
-	for (index = 0; index < pdu.destPtsCount; index++)
+	for (UINT16 index = 0; index < pdu.destPtsCount; index++)
 	{
 		destPt = &(pdu.destPts[index]);
 
@@ -1604,7 +1628,7 @@ static UINT rdpgfx_recv_surface_to_cache_pdu(GENERIC_CHANNEL_CALLBACK* callback,
 
 	WINPR_ASSERT(gfx);
 	RdpgfxClientContext* context = gfx->context;
-	UINT error;
+	UINT error = 0;
 
 	if (!Stream_CheckAndLogRequiredLength(TAG, s, 20))
 		return ERROR_INVALID_DATA;
@@ -1646,8 +1670,7 @@ static UINT rdpgfx_recv_surface_to_cache_pdu(GENERIC_CHANNEL_CALLBACK* callback,
  */
 static UINT rdpgfx_recv_cache_to_surface_pdu(GENERIC_CHANNEL_CALLBACK* callback, wStream* s)
 {
-	UINT16 index;
-	RDPGFX_POINT16* destPt;
+	RDPGFX_POINT16* destPt = NULL;
 	RDPGFX_CACHE_TO_SURFACE_PDU pdu = { 0 };
 	WINPR_ASSERT(callback);
 	RDPGFX_PLUGIN* gfx = (RDPGFX_PLUGIN*)callback->plugin;
@@ -1663,7 +1686,7 @@ static UINT rdpgfx_recv_cache_to_surface_pdu(GENERIC_CHANNEL_CALLBACK* callback,
 	Stream_Read_UINT16(s, pdu.surfaceId);    /* surfaceId (2 bytes) */
 	Stream_Read_UINT16(s, pdu.destPtsCount); /* destPtsCount (2 bytes) */
 
-	if (!Stream_CheckAndLogRequiredLength(TAG, s, 4ull * pdu.destPtsCount))
+	if (!Stream_CheckAndLogRequiredLengthOfSize(TAG, s, pdu.destPtsCount, 4ull))
 		return ERROR_INVALID_DATA;
 
 	pdu.destPts = (RDPGFX_POINT16*)calloc(pdu.destPtsCount, sizeof(RDPGFX_POINT16));
@@ -1674,7 +1697,7 @@ static UINT rdpgfx_recv_cache_to_surface_pdu(GENERIC_CHANNEL_CALLBACK* callback,
 		return CHANNEL_RC_NO_MEMORY;
 	}
 
-	for (index = 0; index < pdu.destPtsCount; index++)
+	for (UINT16 index = 0; index < pdu.destPtsCount; index++)
 	{
 		destPt = &(pdu.destPts[index]);
 
@@ -1866,9 +1889,9 @@ static UINT rdpgfx_recv_map_surface_to_scaled_window_pdu(GENERIC_CHANNEL_CALLBAC
  */
 static UINT rdpgfx_recv_pdu(GENERIC_CHANNEL_CALLBACK* callback, wStream* s)
 {
-	size_t end;
+	size_t end = 0;
 	RDPGFX_HEADER header = { 0 };
-	UINT error;
+	UINT error = 0;
 	WINPR_ASSERT(callback);
 	RDPGFX_PLUGIN* gfx = (RDPGFX_PLUGIN*)callback->plugin;
 	const size_t beg = Stream_GetPosition(s);
@@ -2048,7 +2071,7 @@ static UINT rdpgfx_recv_pdu(GENERIC_CHANNEL_CALLBACK* callback, wStream* s)
 		WLog_Print(gfx->log, WLOG_ERROR, "Error while processing GFX cmdId: %s (0x%04" PRIX16 ")",
 		           rdpgfx_get_cmd_id_string(header.cmdId), header.cmdId);
 		Stream_SetPosition(s, (beg + header.pduLength));
-		return 0;
+		return error;
 	}
 
 	end = Stream_GetPosition(s);
@@ -2071,7 +2094,6 @@ static UINT rdpgfx_recv_pdu(GENERIC_CHANNEL_CALLBACK* callback, wStream* s)
  */
 static UINT rdpgfx_on_data_received(IWTSVirtualChannelCallback* pChannelCallback, wStream* data)
 {
-	wStream* s;
 	int status = 0;
 	UINT32 DstSize = 0;
 	BYTE* pDstData = NULL;
@@ -2081,20 +2103,23 @@ static UINT rdpgfx_on_data_received(IWTSVirtualChannelCallback* pChannelCallback
 	UINT error = CHANNEL_RC_OK;
 
 	WINPR_ASSERT(gfx);
-	status = zgfx_decompress(gfx->zgfx, Stream_Pointer(data),
+	status = zgfx_decompress(gfx->zgfx, Stream_ConstPointer(data),
 	                         (UINT32)Stream_GetRemainingLength(data), &pDstData, &DstSize, 0);
 
 	if (status < 0)
 	{
 		WLog_Print(gfx->log, WLOG_ERROR, "zgfx_decompress failure! status: %d", status);
+		free(pDstData);
 		return ERROR_INTERNAL_ERROR;
 	}
 
-	s = Stream_New(pDstData, DstSize);
+	wStream sbuffer = { 0 };
+	wStream* s = Stream_StaticConstInit(&sbuffer, pDstData, DstSize);
 
 	if (!s)
 	{
 		WLog_Print(gfx->log, WLOG_ERROR, "calloc failed!");
+		free(pDstData);
 		return CHANNEL_RC_NO_MEMORY;
 	}
 
@@ -2108,7 +2133,7 @@ static UINT rdpgfx_on_data_received(IWTSVirtualChannelCallback* pChannelCallback
 		}
 	}
 
-	Stream_Free(s, TRUE);
+	free(pDstData);
 	return error;
 }
 
@@ -2203,7 +2228,7 @@ static void terminate_plugin_cb(GENERIC_DYNVC_PLUGIN* base)
  */
 static UINT rdpgfx_set_surface_data(RdpgfxClientContext* context, UINT16 surfaceId, void* pData)
 {
-	ULONG_PTR key;
+	ULONG_PTR key = 0;
 	WINPR_ASSERT(context);
 	RDPGFX_PLUGIN* gfx = (RDPGFX_PLUGIN*)context->handle;
 	WINPR_ASSERT(gfx);
@@ -2228,9 +2253,8 @@ static UINT rdpgfx_set_surface_data(RdpgfxClientContext* context, UINT16 surface
 static UINT rdpgfx_get_surface_ids(RdpgfxClientContext* context, UINT16** ppSurfaceIds,
                                    UINT16* count_out)
 {
-	size_t count;
-	size_t index;
-	UINT16* pSurfaceIds;
+	size_t count = 0;
+	UINT16* pSurfaceIds = NULL;
 	ULONG_PTR* pKeys = NULL;
 	WINPR_ASSERT(context);
 	RDPGFX_PLUGIN* gfx = (RDPGFX_PLUGIN*)context->handle;
@@ -2254,7 +2278,7 @@ static UINT rdpgfx_get_surface_ids(RdpgfxClientContext* context, UINT16** ppSurf
 		return CHANNEL_RC_NO_MEMORY;
 	}
 
-	for (index = 0; index < count; index++)
+	for (size_t index = 0; index < count; index++)
 	{
 		pSurfaceIds[index] = (UINT16)(pKeys[index] - 1);
 	}
@@ -2267,7 +2291,7 @@ static UINT rdpgfx_get_surface_ids(RdpgfxClientContext* context, UINT16** ppSurf
 
 static void* rdpgfx_get_surface_data(RdpgfxClientContext* context, UINT16 surfaceId)
 {
-	ULONG_PTR key;
+	ULONG_PTR key = 0;
 	void* pData = NULL;
 	WINPR_ASSERT(context);
 	RDPGFX_PLUGIN* gfx = (RDPGFX_PLUGIN*)context->handle;
@@ -2291,8 +2315,8 @@ static UINT rdpgfx_set_cache_slot_data(RdpgfxClientContext* context, UINT16 cach
 	/* Microsoft uses 1-based indexing for the egfx bitmap cache ! */
 	if (cacheSlot == 0 || cacheSlot > gfx->MaxCacheSlots)
 	{
-		WLog_ERR(TAG, "%s: invalid cache slot %" PRIu16 ", must be between 1 and %" PRIu16 "",
-		         __FUNCTION__, cacheSlot, gfx->MaxCacheSlots);
+		WLog_ERR(TAG, "invalid cache slot %" PRIu16 ", must be between 1 and %" PRIu16 "",
+		         cacheSlot, gfx->MaxCacheSlots);
 		return ERROR_INVALID_INDEX;
 	}
 
@@ -2309,8 +2333,8 @@ static void* rdpgfx_get_cache_slot_data(RdpgfxClientContext* context, UINT16 cac
 	/* Microsoft uses 1-based indexing for the egfx bitmap cache ! */
 	if (cacheSlot == 0 || cacheSlot > gfx->MaxCacheSlots)
 	{
-		WLog_ERR(TAG, "%s: invalid cache slot %" PRIu16 ", must be between 1 and %" PRIu16 "",
-		         __FUNCTION__, cacheSlot, gfx->MaxCacheSlots);
+		WLog_ERR(TAG, "invalid cache slot %" PRIu16 ", must be between 1 and %" PRIu16 "",
+		         cacheSlot, gfx->MaxCacheSlots);
 		return NULL;
 	}
 
@@ -2320,7 +2344,7 @@ static void* rdpgfx_get_cache_slot_data(RdpgfxClientContext* context, UINT16 cac
 
 static UINT init_plugin_cb(GENERIC_DYNVC_PLUGIN* base, rdpContext* rcontext, rdpSettings* settings)
 {
-	RdpgfxClientContext* context;
+	RdpgfxClientContext* context = NULL;
 	RDPGFX_PLUGIN* gfx = (RDPGFX_PLUGIN*)base;
 
 	WINPR_ASSERT(base);
@@ -2334,6 +2358,8 @@ static UINT init_plugin_cb(GENERIC_DYNVC_PLUGIN* base, rdpContext* rcontext, rdp
 		return CHANNEL_RC_NO_MEMORY;
 	}
 
+	gfx->suspendFrameAcks =
+	    freerdp_settings_get_bool(gfx->rdpcontext->settings, FreeRDP_GfxSuspendFrameAck);
 	gfx->MaxCacheSlots =
 	    freerdp_settings_get_bool(gfx->rdpcontext->settings, FreeRDP_GfxSmallCache) ? 4096 : 25600;
 
@@ -2375,7 +2401,7 @@ static UINT init_plugin_cb(GENERIC_DYNVC_PLUGIN* base, rdpContext* rcontext, rdp
 void rdpgfx_client_context_free(RdpgfxClientContext* context)
 {
 
-	RDPGFX_PLUGIN* gfx;
+	RDPGFX_PLUGIN* gfx = NULL;
 
 	if (!context)
 		return;
@@ -2396,14 +2422,15 @@ void rdpgfx_client_context_free(RdpgfxClientContext* context)
 }
 
 static const IWTSVirtualChannelCallback rdpgfx_callbacks = { rdpgfx_on_data_received,
-	                                                         rdpgfx_on_open, rdpgfx_on_close };
+	                                                         rdpgfx_on_open, rdpgfx_on_close,
+	                                                         NULL };
 
 /**
  * Function description
  *
  * @return 0 on success, otherwise a Win32 error code
  */
-UINT rdpgfx_DVCPluginEntry(IDRDYNVC_ENTRY_POINTS* pEntryPoints)
+FREERDP_ENTRY_POINT(UINT VCAPITYPE rdpgfx_DVCPluginEntry(IDRDYNVC_ENTRY_POINTS* pEntryPoints))
 {
 	return freerdp_generic_DVCPluginEntry(pEntryPoints, TAG, RDPGFX_DVC_CHANNEL_NAME,
 	                                      sizeof(RDPGFX_PLUGIN), sizeof(GENERIC_CHANNEL_CALLBACK),

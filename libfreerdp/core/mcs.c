@@ -102,7 +102,7 @@
  * 	subInterval			INTEGER (0..MAX)
  * }
  *
- * AttachUserRequest ::= [APPPLICATION 10] IMPLICIT SEQUENCE
+ * AttachUserRequest ::= [APPLICATION 10] IMPLICIT SEQUENCE
  * {
  * }
  *
@@ -300,8 +300,6 @@ static BOOL mcs_read_domain_mcspdu_header(wStream* s, DomainMCSPDU domainMCSPDU,
 
 static int mcs_initialize_client_channels(rdpMcs* mcs, const rdpSettings* settings)
 {
-	UINT32 index;
-
 	if (!mcs || !settings)
 		return -1;
 
@@ -312,7 +310,7 @@ static int mcs_initialize_client_channels(rdpMcs* mcs, const rdpSettings* settin
 
 	ZeroMemory(mcs->channels, sizeof(rdpMcsChannel) * mcs->channelMaxCount);
 
-	for (index = 0; index < mcs->channelCount; index++)
+	for (UINT32 index = 0; index < mcs->channelCount; index++)
 	{
 		const CHANNEL_DEF* defchannel =
 		    freerdp_settings_get_pointer_array(settings, FreeRDP_ChannelDefArray, index);
@@ -337,9 +335,8 @@ static int mcs_initialize_client_channels(rdpMcs* mcs, const rdpSettings* settin
 BOOL mcs_read_domain_mcspdu_header(wStream* s, DomainMCSPDU domainMCSPDU, UINT16* length,
                                    DomainMCSPDU* actual)
 {
-	UINT16 li;
-	BYTE choice;
-	DomainMCSPDU MCSPDU;
+	UINT16 li = 0;
+	BYTE choice = 0;
 
 	if (actual)
 		*actual = DomainMCSPDU_invalid;
@@ -357,7 +354,7 @@ BOOL mcs_read_domain_mcspdu_header(wStream* s, DomainMCSPDU domainMCSPDU, UINT16
 	if (!per_read_choice(s, &choice))
 		return FALSE;
 
-	MCSPDU = (choice >> 2);
+	const DomainMCSPDU MCSPDU = (choice >> 2);
 	if (actual)
 		*actual = MCSPDU;
 
@@ -426,7 +423,7 @@ static BOOL mcs_init_domain_parameters(DomainParameters* domainParameters, UINT3
 
 static BOOL mcs_read_domain_parameters(wStream* s, DomainParameters* domainParameters)
 {
-	size_t length;
+	size_t length = 0;
 
 	if (!s || !domainParameters)
 		return FALSE;
@@ -450,8 +447,8 @@ static BOOL mcs_read_domain_parameters(wStream* s, DomainParameters* domainParam
 
 static BOOL mcs_write_domain_parameters(wStream* s, DomainParameters* domainParameters)
 {
-	size_t length;
-	wStream* tmps;
+	size_t length = 0;
+	wStream* tmps = NULL;
 
 	if (!s || !domainParameters)
 		return FALSE;
@@ -536,6 +533,8 @@ BOOL mcs_merge_domain_parameters(DomainParameters* targetParameters,
 	}
 	else
 	{
+		WLog_ERR(TAG, "invalid maxChannelIds [%" PRIu32 ", %" PRIu32 "]",
+		         targetParameters->maxChannelIds, maximumParameters->maxChannelIds);
 		return FALSE;
 	}
 
@@ -551,6 +550,8 @@ BOOL mcs_merge_domain_parameters(DomainParameters* targetParameters,
 	}
 	else
 	{
+		WLog_ERR(TAG, "invalid maxUserIds [%" PRIu32 ", %" PRIu32 "]", targetParameters->maxUserIds,
+		         maximumParameters->maxUserIds);
 		return FALSE;
 	}
 
@@ -565,6 +566,7 @@ BOOL mcs_merge_domain_parameters(DomainParameters* targetParameters,
 	}
 	else
 	{
+		WLog_ERR(TAG, "invalid numPriorities [%" PRIu32 "]", maximumParameters->numPriorities);
 		return FALSE;
 	}
 
@@ -579,6 +581,8 @@ BOOL mcs_merge_domain_parameters(DomainParameters* targetParameters,
 	}
 	else
 	{
+		WLog_ERR(TAG, "invalid maxHeight [%" PRIu32 ", %" PRIu32 "]", targetParameters->maxHeight,
+		         minimumParameters->maxHeight);
 		return FALSE;
 	}
 
@@ -597,6 +601,8 @@ BOOL mcs_merge_domain_parameters(DomainParameters* targetParameters,
 		}
 		else
 		{
+			WLog_ERR(TAG, "invalid maxMCSPDUsize [%" PRIu32 ", %" PRIu32 "]",
+			         targetParameters->maxMCSPDUsize, minimumParameters->maxMCSPDUsize);
 			return FALSE;
 		}
 	}
@@ -608,6 +614,7 @@ BOOL mcs_merge_domain_parameters(DomainParameters* targetParameters,
 		}
 		else
 		{
+			WLog_ERR(TAG, "invalid maxMCSPDUsize [%" PRIu32 "]", maximumParameters->maxMCSPDUsize);
 			return FALSE;
 		}
 	}
@@ -621,6 +628,9 @@ BOOL mcs_merge_domain_parameters(DomainParameters* targetParameters,
 	}
 	else
 	{
+		WLog_ERR(TAG, "invalid protocolVersion [%" PRIu32 ", %" PRIu32 ", %" PRIu32 "]",
+		         targetParameters->protocolVersion, minimumParameters->protocolVersion,
+		         maximumParameters->protocolVersion);
 		return FALSE;
 	}
 
@@ -636,10 +646,10 @@ BOOL mcs_merge_domain_parameters(DomainParameters* targetParameters,
 
 BOOL mcs_recv_connect_initial(rdpMcs* mcs, wStream* s)
 {
-	UINT16 li;
-	size_t length;
-	BOOL upwardFlag;
-	UINT16 tlength;
+	UINT16 li = 0;
+	size_t length = 0;
+	BOOL upwardFlag = FALSE;
+	UINT16 tlength = 0;
 
 	WINPR_ASSERT(mcs);
 	WINPR_ASSERT(s);
@@ -707,8 +717,8 @@ BOOL mcs_recv_connect_initial(rdpMcs* mcs, wStream* s)
 
 BOOL mcs_write_connect_initial(wStream* s, rdpMcs* mcs, wStream* userData)
 {
-	size_t length;
-	wStream* tmps;
+	size_t length = 0;
+	wStream* tmps = NULL;
 	BOOL ret = FALSE;
 
 	if (!s || !mcs || !userData)
@@ -765,8 +775,8 @@ out:
 
 BOOL mcs_write_connect_response(wStream* s, rdpMcs* mcs, wStream* userData)
 {
-	size_t length;
-	wStream* tmps;
+	size_t length = 0;
+	wStream* tmps = NULL;
 	BOOL ret = FALSE;
 
 	if (!s || !mcs || !userData)
@@ -806,12 +816,13 @@ out:
 static BOOL mcs_send_connect_initial(rdpMcs* mcs)
 {
 	int status = -1;
-	size_t length;
+	size_t length = 0;
 	wStream* s = NULL;
-	size_t bm, em;
+	size_t bm = 0;
+	size_t em = 0;
 	wStream* gcc_CCrq = NULL;
 	wStream* client_data = NULL;
-	rdpContext* context;
+	rdpContext* context = NULL;
 
 	if (!mcs)
 		return FALSE;
@@ -885,11 +896,11 @@ out:
 
 BOOL mcs_recv_connect_response(rdpMcs* mcs, wStream* s)
 {
-	size_t length;
-	UINT16 tlength;
-	BYTE result;
-	UINT16 li;
-	UINT32 calledConnectId;
+	size_t length = 0;
+	UINT16 tlength = 0;
+	BYTE result = 0;
+	UINT16 li = 0;
+	UINT32 calledConnectId = 0;
 
 	if (!mcs || !s)
 		return FALSE;
@@ -926,10 +937,11 @@ BOOL mcs_recv_connect_response(rdpMcs* mcs, wStream* s)
 
 BOOL mcs_send_connect_response(rdpMcs* mcs)
 {
-	size_t length;
+	size_t length = 0;
 	int status = -1;
 	wStream* s = NULL;
-	size_t bm, em;
+	size_t bm = 0;
+	size_t em = 0;
 	wStream* gcc_CCrsp = NULL;
 	wStream* server_data = NULL;
 
@@ -1000,9 +1012,9 @@ out:
 
 BOOL mcs_recv_erect_domain_request(rdpMcs* mcs, wStream* s)
 {
-	UINT16 length;
-	UINT32 subHeight;
-	UINT32 subInterval;
+	UINT16 length = 0;
+	UINT32 subHeight = 0;
+	UINT32 subInterval = 0;
 
 	WINPR_ASSERT(mcs);
 	WINPR_ASSERT(s);
@@ -1027,8 +1039,8 @@ BOOL mcs_recv_erect_domain_request(rdpMcs* mcs, wStream* s)
 
 BOOL mcs_send_erect_domain_request(rdpMcs* mcs)
 {
-	wStream* s;
-	int status;
+	wStream* s = NULL;
+	int status = 0;
 	UINT16 length = 12;
 
 	if (!mcs)
@@ -1060,7 +1072,7 @@ BOOL mcs_send_erect_domain_request(rdpMcs* mcs)
 
 BOOL mcs_recv_attach_user_request(rdpMcs* mcs, wStream* s)
 {
-	UINT16 length;
+	UINT16 length = 0;
 
 	if (!mcs || !s)
 		return FALSE;
@@ -1078,8 +1090,8 @@ BOOL mcs_recv_attach_user_request(rdpMcs* mcs, wStream* s)
 
 BOOL mcs_send_attach_user_request(rdpMcs* mcs)
 {
-	wStream* s;
-	int status;
+	wStream* s = NULL;
+	int status = 0;
 	UINT16 length = 8;
 
 	if (!mcs)
@@ -1108,8 +1120,8 @@ BOOL mcs_send_attach_user_request(rdpMcs* mcs)
 
 BOOL mcs_recv_attach_user_confirm(rdpMcs* mcs, wStream* s)
 {
-	BYTE result;
-	UINT16 length;
+	BYTE result = 0;
+	UINT16 length = 0;
 
 	if (!mcs || !s)
 		return FALSE;
@@ -1131,8 +1143,8 @@ BOOL mcs_recv_attach_user_confirm(rdpMcs* mcs, wStream* s)
 
 BOOL mcs_send_attach_user_confirm(rdpMcs* mcs)
 {
-	wStream* s;
-	int status;
+	wStream* s = NULL;
+	int status = 0;
 	UINT16 length = 11;
 
 	if (!mcs)
@@ -1166,8 +1178,8 @@ BOOL mcs_send_attach_user_confirm(rdpMcs* mcs)
 BOOL mcs_recv_channel_join_request(rdpMcs* mcs, const rdpSettings* settings, wStream* s,
                                    UINT16* channelId)
 {
-	UINT16 length;
-	UINT16 userId;
+	UINT16 length = 0;
+	UINT16 userId = 0;
 
 	if (!mcs || !s || !channelId)
 		return FALSE;
@@ -1202,12 +1214,11 @@ BOOL mcs_recv_channel_join_request(rdpMcs* mcs, const rdpSettings* settings, wSt
 
 BOOL mcs_send_channel_join_request(rdpMcs* mcs, UINT16 channelId)
 {
-	wStream* s;
-	int status;
+	wStream* s = NULL;
+	int status = 0;
 	UINT16 length = 12;
 
-	if (!mcs)
-		return FALSE;
+	WINPR_ASSERT(mcs);
 
 	s = Stream_New(NULL, length);
 
@@ -1234,13 +1245,13 @@ BOOL mcs_send_channel_join_request(rdpMcs* mcs, UINT16 channelId)
 
 BOOL mcs_recv_channel_join_confirm(rdpMcs* mcs, wStream* s, UINT16* channelId)
 {
-	UINT16 length;
-	BYTE result;
-	UINT16 initiator;
-	UINT16 requested;
+	UINT16 length = 0;
+	BYTE result = 0;
+	UINT16 initiator = 0;
+	UINT16 requested = 0;
 
-	if (!mcs || !s || !channelId)
-		return FALSE;
+	WINPR_ASSERT(mcs);
+	WINPR_ASSERT(channelId);
 
 	if (!mcs_read_domain_mcspdu_header(s, DomainMCSPDU_ChannelJoinConfirm, &length, NULL))
 		return FALSE;
@@ -1264,7 +1275,7 @@ BOOL mcs_recv_channel_join_confirm(rdpMcs* mcs, wStream* s, UINT16* channelId)
 
 BOOL mcs_send_channel_join_confirm(rdpMcs* mcs, UINT16 channelId)
 {
-	wStream* s;
+	wStream* s = NULL;
 	int status = -1;
 	UINT16 length = 15;
 
@@ -1303,7 +1314,8 @@ fail:
 
 BOOL mcs_recv_disconnect_provider_ultimatum(rdpMcs* mcs, wStream* s, int* reason)
 {
-	BYTE b1, b2;
+	BYTE b1 = 0;
+	BYTE b2 = 0;
 
 	WINPR_ASSERT(mcs);
 	WINPR_ASSERT(s);
@@ -1353,8 +1365,8 @@ BOOL mcs_recv_disconnect_provider_ultimatum(rdpMcs* mcs, wStream* s, int* reason
 
 BOOL mcs_send_disconnect_provider_ultimatum(rdpMcs* mcs)
 {
-	wStream* s;
-	int status;
+	wStream* s = NULL;
+	int status = -1;
 	UINT16 length = 9;
 
 	WINPR_ASSERT(mcs);
@@ -1362,21 +1374,22 @@ BOOL mcs_send_disconnect_provider_ultimatum(rdpMcs* mcs)
 	s = Stream_New(NULL, length);
 
 	if (!s)
-	{
-		WLog_ERR(TAG, "Stream_New failed!");
-		return FALSE;
-	}
+		goto fail;
 
-	mcs_write_domain_mcspdu_header(s, DomainMCSPDU_DisconnectProviderUltimatum, length, 1);
-	per_write_enumerated(s, 0x80, 0);
+	if (!mcs_write_domain_mcspdu_header(s, DomainMCSPDU_DisconnectProviderUltimatum, length, 1))
+		goto fail;
+
+	if (!per_write_enumerated(s, 0x80, 0))
+		goto fail;
 	status = transport_write(mcs->transport, s);
+fail:
 	Stream_Free(s, TRUE);
 	return (status < 0) ? FALSE : TRUE;
 }
 
 BOOL mcs_client_begin(rdpMcs* mcs)
 {
-	rdpContext* context;
+	rdpContext* context = NULL;
 
 	if (!mcs || !mcs->transport)
 		return FALSE;
@@ -1406,7 +1419,7 @@ BOOL mcs_client_begin(rdpMcs* mcs)
 
 rdpMcs* mcs_new(rdpTransport* transport)
 {
-	rdpMcs* mcs;
+	rdpMcs* mcs = NULL;
 
 	mcs = (rdpMcs*)calloc(1, sizeof(rdpMcs));
 
@@ -1448,26 +1461,28 @@ void mcs_free(rdpMcs* mcs)
 
 BOOL mcs_server_apply_to_settings(const rdpMcs* mcs, rdpSettings* settings)
 {
-	UINT32 x;
+	BOOL rc = FALSE;
 
 	WINPR_ASSERT(mcs);
 	WINPR_ASSERT(settings);
 
 	if (!freerdp_settings_set_uint32(settings, FreeRDP_ChannelCount, mcs->channelCount))
-		return FALSE;
-	if (!freerdp_settings_set_pointer_len(settings, FreeRDP_ChannelDefArray, NULL,
-	                                      mcs->channelCount))
-		return FALSE;
+		goto fail;
 
-	for (x = 0; x < mcs->channelCount; x++)
+	for (UINT32 x = 0; x < mcs->channelCount; x++)
 	{
 		const rdpMcsChannel* current = &mcs->channels[x];
 		CHANNEL_DEF def = { 0 };
 		def.options = current->options;
 		memcpy(def.name, current->Name, sizeof(def.name));
 		if (!freerdp_settings_set_pointer_array(settings, FreeRDP_ChannelDefArray, x, &def))
-			return FALSE;
+			goto fail;
 	}
 
-	return TRUE;
+	rc = TRUE;
+fail:
+	if (!rc)
+		WLog_WARN(TAG, "failed to apply settings");
+
+	return rc;
 }

@@ -27,26 +27,25 @@
 #include <freerdp/types.h>
 #include <freerdp/channels/wtsvc.h>
 #include <freerdp/channels/rdpdr.h>
+#include <freerdp/utils/rdpdr_utils.h>
 
-/**
- * Server Interface
- */
-
-typedef struct s_rdpdr_server_context RdpdrServerContext;
-typedef struct s_rdpdr_server_private RdpdrServerPrivate;
-
-typedef struct
+#ifdef __cplusplus
+extern "C"
 {
-	UINT16 Component;
-	UINT16 PacketId;
-} RDPDR_HEADER;
+#endif
 
-typedef struct
-{
-	UINT16 CapabilityType;
-	UINT16 CapabilityLength;
-	UINT32 Version;
-} RDPDR_CAPABILITY_HEADER;
+	/**
+	 * Server Interface
+	 */
+
+	typedef struct s_rdpdr_server_context RdpdrServerContext;
+	typedef struct s_rdpdr_server_private RdpdrServerPrivate;
+
+	typedef struct
+	{
+		UINT16 Component;
+		UINT16 PacketId;
+	} RDPDR_HEADER;
 
 #ifndef __MINGW32__
 typedef struct
@@ -63,15 +62,6 @@ typedef struct
 	char FileName[512];
 } FILE_DIRECTORY_INFORMATION;
 #endif
-
-typedef struct
-{
-	UINT32 DeviceType;
-	UINT32 DeviceId;
-	char PreferredDosName[9];
-	UINT32 DeviceDataLength;
-	BYTE* DeviceData;
-} RdpdrDevice;
 
 typedef UINT (*psRdpdrStart)(RdpdrServerContext* context);
 typedef UINT (*psRdpdrStop)(RdpdrServerContext* context);
@@ -225,13 +215,10 @@ struct s_rdpdr_server_context
 	rdpContext* rdpcontext;
 };
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
+FREERDP_API void rdpdr_server_context_free(RdpdrServerContext* context);
 
-	FREERDP_API RdpdrServerContext* rdpdr_server_context_new(HANDLE vcm);
-	FREERDP_API void rdpdr_server_context_free(RdpdrServerContext* context);
+WINPR_ATTR_MALLOC(rdpdr_server_context_free, 1)
+FREERDP_API RdpdrServerContext* rdpdr_server_context_new(HANDLE vcm);
 
 #ifdef __cplusplus
 }

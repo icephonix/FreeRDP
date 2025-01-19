@@ -35,6 +35,7 @@
 
 #include <winpr/wtypes.h>
 #include <winpr/crt.h>
+#include <winpr/string.h>
 #include <winpr/path.h>
 #include <winpr/file.h>
 #include <winpr/stream.h>
@@ -44,12 +45,12 @@
 #include "drive_file.h"
 
 #ifdef WITH_DEBUG_RDPDR
-#define DEBUG_WSTR(msg, wstr)                              \
-	do                                                     \
-	{                                                      \
-		char lpstr[1024] = { 0 };                          \
-		ConvertWCharToUtf8(wstr, lpstr, ARRAYSIZE(lpstr)); \
-		WLog_DBG(TAG, msg, lpstr);                         \
+#define DEBUG_WSTR(msg, wstr)                                    \
+	do                                                           \
+	{                                                            \
+		char lpstr[1024] = { 0 };                                \
+		(void)ConvertWCharToUtf8(wstr, lpstr, ARRAYSIZE(lpstr)); \
+		WLog_DBG(TAG, msg, lpstr);                               \
 	} while (0)
 #else
 #define DEBUG_WSTR(msg, wstr) \
@@ -60,14 +61,12 @@
 
 static BOOL drive_file_fix_path(WCHAR* path, size_t length)
 {
-	size_t i;
-
 	if ((length == 0) || (length > UINT32_MAX))
 		return FALSE;
 
 	WINPR_ASSERT(path);
 
-	for (i = 0; i < length; i++)
+	for (size_t i = 0; i < length; i++)
 	{
 		if (path[i] == L'\\')
 			path[i] = L'/';
@@ -91,18 +90,47 @@ static BOOL drive_file_fix_path(WCHAR* path, size_t length)
 	return TRUE;
 }
 
+static BOOL contains_dotdot(const WCHAR* path, size_t base_length, size_t path_length)
+{
+	WCHAR dotdotbuffer[6] = { 0 };
+	const WCHAR* dotdot = InitializeConstWCharFromUtf8("..", dotdotbuffer, ARRAYSIZE(dotdotbuffer));
+	const WCHAR* tst = path;
+
+	if (path_length < 2)
+		return FALSE;
+
+	do
+	{
+		tst = _wcsstr(tst, dotdot);
+		if (!tst)
+			return FALSE;
+
+		/* Filter .. sequences in file or directory names */
+		if ((base_length == 0) || (*(tst - 1) == L'/') || (*(tst - 1) == L'\\'))
+		{
+			if (tst + 2 < path + path_length)
+			{
+				if ((tst[2] == '/') || (tst[2] == '\\'))
+					return TRUE;
+			}
+		}
+		tst += 2;
+	} while (TRUE);
+
+	return FALSE;
+}
+
 static WCHAR* drive_file_combine_fullpath(const WCHAR* base_path, const WCHAR* path,
                                           size_t PathWCharLength)
 {
 	BOOL ok = FALSE;
 	WCHAR* fullpath = NULL;
-	size_t length;
 
 	if (!base_path || (!path && (PathWCharLength > 0)))
 		goto fail;
 
 	const size_t base_path_length = _wcsnlen(base_path, MAX_PATH);
-	length = base_path_length + PathWCharLength + 1;
+	const size_t length = base_path_length + PathWCharLength + 1;
 	fullpath = (WCHAR*)calloc(length, sizeof(WCHAR));
 
 	if (!fullpath)
@@ -116,11 +144,10 @@ static WCHAR* drive_file_combine_fullpath(const WCHAR* base_path, const WCHAR* p
 		goto fail;
 
 	/* Ensure the path does not contain sequences like '..' */
-	const WCHAR dotdot[] = { '.', '.', '\0' };
-	if (_wcsstr(&fullpath[base_path_length], dotdot))
+	if (contains_dotdot(&fullpath[base_path_length], base_path_length, PathWCharLength))
 	{
 		char abuffer[MAX_PATH] = { 0 };
-		ConvertWCharToUtf8(&fullpath[base_path_length], abuffer, ARRAYSIZE(abuffer));
+		(void)ConvertWCharToUtf8(&fullpath[base_path_length], abuffer, ARRAYSIZE(abuffer));
 
 		WLog_WARN(TAG, "[rdpdr] received invalid file path '%s' from server, aborting!",
 		          &abuffer[base_path_length]);
@@ -137,94 +164,24 @@ fail:
 	return fullpath;
 }
 
-static BOOL drive_file_remove_dir(const WCHAR* path)
-{
-	WIN32_FIND_DATAW findFileData = { 0 };
-	BOOL ret = TRUE;
-	HANDLE dir = INVALID_HANDLE_VALUE;
-	WCHAR* fullpath = NULL;
-	WCHAR* path_slash = NULL;
-	size_t base_path_length = 0;
-
-	if (!path)
-		return FALSE;
-
-	base_path_length = _wcslen(path);
-	path_slash = (WCHAR*)calloc(base_path_length + 3, sizeof(WCHAR));
-
-	if (!path_slash)
-	{
-		WLog_ERR(TAG, "malloc failed!");
-		return FALSE;
-	}
-
-	CopyMemory(path_slash, path, base_path_length * sizeof(WCHAR));
-	path_slash[base_path_length] = L'/';
-	path_slash[base_path_length + 1] = L'*';
-	DEBUG_WSTR("Search in %s", path_slash);
-	dir = FindFirstFileW(path_slash, &findFileData);
-
-	if (dir == INVALID_HANDLE_VALUE)
-	{
-		free(path_slash);
-		return FALSE;
-	}
-
-	do
-	{
-		const size_t len = _wcsnlen(findFileData.cFileName, ARRAYSIZE(findFileData.cFileName));
-
-		if ((len == 1 && findFileData.cFileName[0] == L'.') ||
-		    (len == 2 && findFileData.cFileName[0] == L'.' && findFileData.cFileName[1] == L'.'))
-		{
-			continue;
-		}
-
-		fullpath = drive_file_combine_fullpath(path_slash, findFileData.cFileName, len);
-		DEBUG_WSTR("Delete %s", fullpath);
-
-		if (findFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-		{
-			ret = drive_file_remove_dir(fullpath);
-		}
-		else
-		{
-			ret = DeleteFileW(fullpath);
-		}
-
-		free(fullpath);
-
-		if (!ret)
-			break;
-	} while (ret && FindNextFileW(dir, &findFileData) != 0);
-
-	FindClose(dir);
-
-	if (ret)
-	{
-		if (!RemoveDirectoryW(path))
-		{
-			ret = FALSE;
-		}
-	}
-
-	free(path_slash);
-	return ret;
-}
-
 static BOOL drive_file_set_fullpath(DRIVE_FILE* file, WCHAR* fullpath)
 {
 	if (!file || !fullpath)
 		return FALSE;
 
+	const size_t len = _wcslen(fullpath);
 	free(file->fullpath);
-	file->fullpath = fullpath;
-	file->filename = _wcsrchr(file->fullpath, L'/');
+	file->fullpath = NULL;
 
-	if (file->filename == NULL)
-		file->filename = file->fullpath;
-	else
-		file->filename += 1;
+	if (len == 0)
+		return TRUE;
+
+	file->fullpath = fullpath;
+
+	const WCHAR sep[] = { PathGetSeparatorW(PATH_STYLE_NATIVE), '\0' };
+	WCHAR* filename = _wcsrchr(file->fullpath, *sep);
+	if (filename && _wcsncmp(filename, sep, ARRAYSIZE(sep)) == 0)
+		*filename = '\0';
 
 	return TRUE;
 }
@@ -360,7 +317,7 @@ DRIVE_FILE* drive_file_new(const WCHAR* base_path, const WCHAR* path, UINT32 Pat
                            UINT32 id, UINT32 DesiredAccess, UINT32 CreateDisposition,
                            UINT32 CreateOptions, UINT32 FileAttributes, UINT32 SharedAccess)
 {
-	DRIVE_FILE* file;
+	DRIVE_FILE* file = NULL;
 
 	if (!base_path || (!path && (PathWCharLength > 0)))
 		return NULL;
@@ -404,7 +361,7 @@ BOOL drive_file_free(DRIVE_FILE* file)
 
 	if (file->file_handle != INVALID_HANDLE_VALUE)
 	{
-		CloseHandle(file->file_handle);
+		(void)CloseHandle(file->file_handle);
 		file->file_handle = INVALID_HANDLE_VALUE;
 	}
 
@@ -418,7 +375,7 @@ BOOL drive_file_free(DRIVE_FILE* file)
 	{
 		if (file->is_dir)
 		{
-			if (!drive_file_remove_dir(file->fullpath))
+			if (!winpr_RemoveDirectory_RecursiveW(file->fullpath))
 				goto fail;
 		}
 		else if (!DeleteFileW(file->fullpath))
@@ -435,7 +392,7 @@ fail:
 
 BOOL drive_file_seek(DRIVE_FILE* file, UINT64 Offset)
 {
-	LARGE_INTEGER loffset;
+	LARGE_INTEGER loffset = { 0 };
 
 	if (!file)
 		return FALSE;
@@ -449,7 +406,7 @@ BOOL drive_file_seek(DRIVE_FILE* file, UINT64 Offset)
 
 BOOL drive_file_read(DRIVE_FILE* file, BYTE* buffer, UINT32* Length)
 {
-	DWORD read;
+	DWORD read = 0;
 
 	if (!file || !buffer || !Length)
 		return FALSE;
@@ -465,9 +422,9 @@ BOOL drive_file_read(DRIVE_FILE* file, BYTE* buffer, UINT32* Length)
 	return FALSE;
 }
 
-BOOL drive_file_write(DRIVE_FILE* file, BYTE* buffer, UINT32 Length)
+BOOL drive_file_write(DRIVE_FILE* file, const BYTE* buffer, UINT32 Length)
 {
-	DWORD written;
+	DWORD written = 0;
 
 	if (!file || !buffer)
 		return FALSE;
@@ -617,8 +574,8 @@ static BOOL drive_file_query_from_attributes(const DRIVE_FILE* file,
 BOOL drive_file_query_information(DRIVE_FILE* file, UINT32 FsInformationClass, wStream* output)
 {
 	BY_HANDLE_FILE_INFORMATION fileInformation = { 0 };
-	BOOL status;
-	HANDLE hFile;
+	BOOL status = 0;
+	HANDLE hFile = NULL;
 
 	if (!file || !output)
 		return FALSE;
@@ -628,7 +585,7 @@ BOOL drive_file_query_information(DRIVE_FILE* file, UINT32 FsInformationClass, w
 	if (hFile != INVALID_HANDLE_VALUE)
 	{
 		status = GetFileInformationByHandle(hFile, &fileInformation);
-		CloseHandle(hFile);
+		(void)CloseHandle(hFile);
 		if (!status)
 			goto out_fail;
 
@@ -657,24 +614,24 @@ out_fail:
 BOOL drive_file_set_information(DRIVE_FILE* file, UINT32 FsInformationClass, UINT32 Length,
                                 wStream* input)
 {
-	INT64 size;
-	WCHAR* fullpath;
-	ULARGE_INTEGER liCreationTime;
-	ULARGE_INTEGER liLastAccessTime;
-	ULARGE_INTEGER liLastWriteTime;
-	ULARGE_INTEGER liChangeTime;
+	INT64 size = 0;
+	WCHAR* fullpath = NULL;
+	ULARGE_INTEGER liCreationTime = { 0 };
+	ULARGE_INTEGER liLastAccessTime = { 0 };
+	ULARGE_INTEGER liLastWriteTime = { 0 };
+	ULARGE_INTEGER liChangeTime = { 0 };
 	FILETIME ftCreationTime;
 	FILETIME ftLastAccessTime;
 	FILETIME ftLastWriteTime;
 	FILETIME* pftCreationTime = NULL;
 	FILETIME* pftLastAccessTime = NULL;
 	FILETIME* pftLastWriteTime = NULL;
-	UINT32 FileAttributes;
-	UINT32 FileNameLength;
-	LARGE_INTEGER liSize;
-	UINT8 delete_pending;
-	UINT8 ReplaceIfExists;
-	DWORD attr;
+	UINT32 FileAttributes = 0;
+	UINT32 FileNameLength = 0;
+	LARGE_INTEGER liSize = { 0 };
+	UINT8 delete_pending = 0;
+	UINT8 ReplaceIfExists = 0;
+	DWORD attr = 0;
 
 	if (!file || !input)
 		return FALSE;
@@ -823,7 +780,7 @@ BOOL drive_file_set_information(DRIVE_FILE* file, UINT32 FsInformationClass, UIN
 			if (!Stream_CheckAndLogRequiredLength(TAG, input, FileNameLength))
 				return FALSE;
 
-			fullpath = drive_file_combine_fullpath(file->basepath, (WCHAR*)Stream_Pointer(input),
+			fullpath = drive_file_combine_fullpath(file->basepath, Stream_ConstPointer(input),
 			                                       FileNameLength / sizeof(WCHAR));
 
 			if (!fullpath)
@@ -833,7 +790,7 @@ BOOL drive_file_set_information(DRIVE_FILE* file, UINT32 FsInformationClass, UIN
 
 			if (file->file_handle != INVALID_HANDLE_VALUE)
 			{
-				CloseHandle(file->file_handle);
+				(void)CloseHandle(file->file_handle);
 				file->file_handle = INVALID_HANDLE_VALUE;
 			}
 
@@ -868,8 +825,8 @@ BOOL drive_file_set_information(DRIVE_FILE* file, UINT32 FsInformationClass, UIN
 BOOL drive_file_query_directory(DRIVE_FILE* file, UINT32 FsInformationClass, BYTE InitialQuery,
                                 const WCHAR* path, UINT32 PathWCharLength, wStream* output)
 {
-	size_t length;
-	WCHAR* ent_path;
+	size_t length = 0;
+	WCHAR* ent_path = NULL;
 
 	if (!file || !path || !output)
 		return FALSE;

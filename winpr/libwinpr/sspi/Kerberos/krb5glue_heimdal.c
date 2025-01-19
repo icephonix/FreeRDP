@@ -17,7 +17,9 @@
  * limitations under the License.
  */
 
-#ifdef WITH_KRB5_HEIMDAL
+#ifndef WITH_KRB5_HEIMDAL
+#error "This file must only be included with HEIMDAL kerberos"
+#endif
 
 #include <winpr/endian.h>
 #include <winpr/wlog.h>
@@ -81,9 +83,9 @@ krb5_error_code krb5glue_update_keyset(krb5_context ctx, krb5_auth_context auth_
 	return rv;
 }
 
-krb5_error_code krb5glue_verify_checksum_iov(krb5_context ctx, krb5glue_key key, unsigned usage,
-                                             krb5_crypto_iov* iov, unsigned int iov_size,
-                                             krb5_boolean* is_valid)
+krb5_error_code krb5glue_verify_checksum_iov(krb5_context ctx, krb5glue_key key,
+                                             krb5_keyusage usage, krb5_crypto_iov* iov,
+                                             unsigned int iov_size, krb5_boolean* is_valid)
 {
 	krb5_error_code rv = 0;
 
@@ -136,7 +138,9 @@ BOOL krb5glue_authenticator_validate_chksum(krb5glue_authenticator authenticator
 	if (!authenticator || !authenticator->cksum || authenticator->cksum->cksumtype != cksumtype ||
 	    authenticator->cksum->checksum.length < 24)
 		return FALSE;
-	Data_Read_UINT32((authenticator->cksum->checksum.data + 20), (*flags));
+
+	const BYTE* data = authenticator->cksum->checksum.data;
+	Data_Read_UINT32((data + 20), (*flags));
 	return TRUE;
 }
 
@@ -185,7 +189,7 @@ krb5_error_code krb5glue_get_init_creds(krb5_context ctx, krb5_principal princ, 
 			break;
 		if ((rv = krb5_init_creds_set_password(ctx, creds_ctx, password)) != 0)
 			break;
-		if (krb_settings->armorCache)
+		if (krb_settings && krb_settings->armorCache)
 		{
 			krb5_ccache armor_cc = NULL;
 			if ((rv = krb5_cc_resolve(ctx, krb_settings->armorCache, &armor_cc)) != 0)
@@ -209,4 +213,3 @@ krb5_error_code krb5glue_get_init_creds(krb5_context ctx, krb5_principal princ, 
 	return rv;
 }
 
-#endif /* WITH_KRB5_HEIMDAL */

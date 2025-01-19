@@ -22,6 +22,8 @@
 #define FREERDP_CHANNEL_RDPSND_CLIENT_RDPSND_H
 
 #include <freerdp/channels/rdpsnd.h>
+#include <freerdp/settings.h>
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -78,7 +80,8 @@ typedef struct
 } FREERDP_RDPSND_DEVICE_ENTRY_POINTS;
 typedef FREERDP_RDPSND_DEVICE_ENTRY_POINTS* PFREERDP_RDPSND_DEVICE_ENTRY_POINTS;
 
-typedef UINT (*PFREERDP_RDPSND_DEVICE_ENTRY)(PFREERDP_RDPSND_DEVICE_ENTRY_POINTS pEntryPoints);
+typedef UINT(VCAPITYPE* PFREERDP_RDPSND_DEVICE_ENTRY)(
+	PFREERDP_RDPSND_DEVICE_ENTRY_POINTS pEntryPoints);
 
 FREERDP_API rdpContext* freerdp_rdpsnd_get_context(rdpsndPlugin* plugin);
 

@@ -25,7 +25,14 @@
 
 BOOL state_run_failed(state_run_t status)
 {
-	return status == STATE_RUN_FAILED;
+	switch (status)
+	{
+		case STATE_RUN_FAILED:
+		case STATE_RUN_QUIT_SESSION:
+			return TRUE;
+		default:
+			return FALSE;
+	}
 }
 
 BOOL state_run_success(state_run_t status)
@@ -37,7 +44,7 @@ BOOL state_run_success(state_run_t status)
 
 const char* state_run_result_string(state_run_t status, char* buffer, size_t buffersize)
 {
-	const char* name;
+	const char* name = NULL;
 
 	switch (status)
 	{
@@ -53,6 +60,9 @@ const char* state_run_result_string(state_run_t status, char* buffer, size_t buf
 		case STATE_RUN_FAILED:
 			name = "STATE_RUN_FAILED";
 			break;
+		case STATE_RUN_QUIT_SESSION:
+			name = "STATE_RUN_QUIT_SESSION";
+			break;
 		case STATE_RUN_TRY_AGAIN:
 			name = "STATE_RUN_TRY_AGAIN";
 			break;
@@ -64,7 +74,7 @@ const char* state_run_result_string(state_run_t status, char* buffer, size_t buf
 			break;
 	}
 
-	_snprintf(buffer, buffersize, "%s [%d]", name, status);
+	(void)_snprintf(buffer, buffersize, "%s [%d]", name, status);
 	return buffer;
 }
 

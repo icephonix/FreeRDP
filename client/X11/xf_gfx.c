@@ -21,7 +21,11 @@
 
 #include <freerdp/config.h>
 
+#include <math.h>
+
 #include <winpr/assert.h>
+#include <winpr/cast.h>
+
 #include <freerdp/log.h>
 #include "xf_gfx.h"
 #include "xf_rail.h"
@@ -33,51 +37,52 @@
 static UINT xf_OutputUpdate(xfContext* xfc, xfGfxSurface* surface)
 {
 	UINT rc = ERROR_INTERNAL_ERROR;
-	UINT32 surfaceX, surfaceY;
-	RECTANGLE_16 surfaceRect;
-	rdpGdi* gdi;
-	const rdpSettings* settings;
-	UINT32 nbRects, x;
-	double sx, sy;
-	const RECTANGLE_16* rects;
+	UINT32 surfaceX = 0;
+	UINT32 surfaceY = 0;
+	RECTANGLE_16 surfaceRect = { 0 };
+	UINT32 nbRects = 0;
+	const RECTANGLE_16* rects = NULL;
 
 	WINPR_ASSERT(xfc);
 	WINPR_ASSERT(surface);
 
-	gdi = xfc->common.context.gdi;
+	rdpGdi* gdi = xfc->common.context.gdi;
 	WINPR_ASSERT(gdi);
 
-	settings = xfc->common.context.settings;
+	rdpSettings* settings = xfc->common.context.settings;
 	WINPR_ASSERT(settings);
 
 	surfaceX = surface->gdi.outputOriginX;
 	surfaceY = surface->gdi.outputOriginY;
 	surfaceRect.left = 0;
 	surfaceRect.top = 0;
-	surfaceRect.right = surface->gdi.mappedWidth;
-	surfaceRect.bottom = surface->gdi.mappedHeight;
+	surfaceRect.right = WINPR_ASSERTING_INT_CAST(UINT16, surface->gdi.mappedWidth);
+	surfaceRect.bottom = WINPR_ASSERTING_INT_CAST(UINT16, surface->gdi.mappedHeight);
 	XSetClipMask(xfc->display, xfc->gc, None);
 	XSetFunction(xfc->display, xfc->gc, GXcopy);
 	XSetFillStyle(xfc->display, xfc->gc, FillSolid);
 	region16_intersect_rect(&(surface->gdi.invalidRegion), &(surface->gdi.invalidRegion),
 	                        &surfaceRect);
-	sx = surface->gdi.outputTargetWidth / (double)surface->gdi.mappedWidth;
-	sy = surface->gdi.outputTargetHeight / (double)surface->gdi.mappedHeight;
+
+	WINPR_ASSERT(surface->gdi.mappedWidth);
+	WINPR_ASSERT(surface->gdi.mappedHeight);
+	const double sx = 1.0 * surface->gdi.outputTargetWidth / (double)surface->gdi.mappedWidth;
+	const double sy = 1.0 * surface->gdi.outputTargetHeight / (double)surface->gdi.mappedHeight;
 
 	if (!(rects = region16_rects(&surface->gdi.invalidRegion, &nbRects)))
 		return CHANNEL_RC_OK;
 
-	for (x = 0; x < nbRects; x++)
+	for (UINT32 x = 0; x < nbRects; x++)
 	{
 		const RECTANGLE_16* rect = &rects[x];
 		const UINT32 nXSrc = rect->left;
 		const UINT32 nYSrc = rect->top;
 		const UINT32 swidth = rect->right - nXSrc;
 		const UINT32 sheight = rect->bottom - nYSrc;
-		const UINT32 nXDst = surfaceX + nXSrc * sx;
-		const UINT32 nYDst = surfaceY + nYSrc * sy;
-		const UINT32 dwidth = swidth * sx;
-		const UINT32 dheight = sheight * sy;
+		const UINT32 nXDst = (UINT32)lround(1.0 * surfaceX + nXSrc * sx);
+		const UINT32 nYDst = (UINT32)lround(1.0 * surfaceY + nYSrc * sy);
+		const UINT32 dwidth = (UINT32)lround(1.0 * swidth * sx);
+		const UINT32 dheight = (UINT32)lround(1.0 * sheight * sy);
 
 		if (surface->stage)
 		{
@@ -89,25 +94,35 @@ static UINT xf_OutputUpdate(xfContext* xfc, xfGfxSurface* surface)
 
 		if (xfc->remote_app)
 		{
-			XPutImage(xfc->display, xfc->primary, xfc->gc, surface->image, nXSrc, nYSrc, nXDst,
-			          nYDst, dwidth, dheight);
+			XPutImage(xfc->display, xfc->primary, xfc->gc, surface->image,
+			          WINPR_ASSERTING_INT_CAST(int, nXSrc), WINPR_ASSERTING_INT_CAST(int, nYSrc),
+			          WINPR_ASSERTING_INT_CAST(int, nXDst), WINPR_ASSERTING_INT_CAST(int, nYDst),
+			          dwidth, dheight);
 			xf_lock_x11(xfc);
 			xf_rail_paint_surface(xfc, surface->gdi.windowId, rect);
 			xf_unlock_x11(xfc);
 		}
 		else
 #ifdef WITH_XRENDER
-		    if (settings->SmartSizing || settings->MultiTouchGestures)
+		    if (freerdp_settings_get_bool(settings, FreeRDP_SmartSizing) ||
+		        freerdp_settings_get_bool(settings, FreeRDP_MultiTouchGestures))
 		{
-			XPutImage(xfc->display, xfc->primary, xfc->gc, surface->image, nXSrc, nYSrc, nXDst,
-			          nYDst, dwidth, dheight);
-			xf_draw_screen(xfc, nXDst, nYDst, dwidth, dheight);
+			XPutImage(xfc->display, xfc->primary, xfc->gc, surface->image,
+			          WINPR_ASSERTING_INT_CAST(int, nXSrc), WINPR_ASSERTING_INT_CAST(int, nYSrc),
+			          WINPR_ASSERTING_INT_CAST(int, nXDst), WINPR_ASSERTING_INT_CAST(int, nYDst),
+			          dwidth, dheight);
+			xf_draw_screen(xfc, WINPR_ASSERTING_INT_CAST(int32_t, nXDst),
+			               WINPR_ASSERTING_INT_CAST(int32_t, nYDst),
+			               WINPR_ASSERTING_INT_CAST(int32_t, dwidth),
+			               WINPR_ASSERTING_INT_CAST(int32_t, dheight));
 		}
 		else
 #endif
 		{
-			XPutImage(xfc->display, xfc->drawable, xfc->gc, surface->image, nXSrc, nYSrc, nXDst,
-			          nYDst, dwidth, dheight);
+			XPutImage(xfc->display, xfc->drawable, xfc->gc, surface->image,
+			          WINPR_ASSERTING_INT_CAST(int, nXSrc), WINPR_ASSERTING_INT_CAST(int, nYSrc),
+			          WINPR_ASSERTING_INT_CAST(int, nXDst), WINPR_ASSERTING_INT_CAST(int, nYDst),
+			          dwidth, dheight);
 		}
 	}
 
@@ -128,12 +143,11 @@ static UINT xf_WindowUpdate(RdpgfxClientContext* context, xfGfxSurface* surface)
 
 static UINT xf_UpdateSurfaces(RdpgfxClientContext* context)
 {
-	UINT16 count;
-	UINT32 index;
+	UINT16 count = 0;
 	UINT status = CHANNEL_RC_OK;
 	UINT16* pSurfaceIds = NULL;
 	rdpGdi* gdi = (rdpGdi*)context->custom;
-	xfContext* xfc;
+	xfContext* xfc = NULL;
 
 	if (!gdi)
 		return status;
@@ -145,7 +159,7 @@ static UINT xf_UpdateSurfaces(RdpgfxClientContext* context)
 	EnterCriticalSection(&context->mux);
 	context->GetSurfaceIds(context, &pSurfaceIds, &count);
 
-	for (index = 0; index < count; index++)
+	for (UINT32 index = 0; index < count; index++)
 	{
 		xfGfxSurface* surface = (xfGfxSurface*)context->GetSurfaceData(context, pSurfaceIds[index]);
 
@@ -175,13 +189,12 @@ static UINT xf_UpdateSurfaces(RdpgfxClientContext* context)
 
 UINT xf_OutputExpose(xfContext* xfc, UINT32 x, UINT32 y, UINT32 width, UINT32 height)
 {
-	UINT16 count;
-	UINT32 index;
+	UINT16 count = 0;
 	UINT status = ERROR_INTERNAL_ERROR;
 	RECTANGLE_16 invalidRect = { 0 };
 	RECTANGLE_16 intersection = { 0 };
 	UINT16* pSurfaceIds = NULL;
-	RdpgfxClientContext* context;
+	RdpgfxClientContext* context = NULL;
 
 	WINPR_ASSERT(xfc);
 	WINPR_ASSERT(xfc->common.context.gdi);
@@ -189,10 +202,10 @@ UINT xf_OutputExpose(xfContext* xfc, UINT32 x, UINT32 y, UINT32 width, UINT32 he
 	context = xfc->common.context.gdi->gfx;
 	WINPR_ASSERT(context);
 
-	invalidRect.left = x;
-	invalidRect.top = y;
-	invalidRect.right = x + width;
-	invalidRect.bottom = y + height;
+	invalidRect.left = WINPR_ASSERTING_INT_CAST(UINT16, x);
+	invalidRect.top = WINPR_ASSERTING_INT_CAST(UINT16, y);
+	invalidRect.right = WINPR_ASSERTING_INT_CAST(UINT16, x + width);
+	invalidRect.bottom = WINPR_ASSERTING_INT_CAST(UINT16, y + height);
 	status = context->GetSurfaceIds(context, &pSurfaceIds, &count);
 
 	if (status != CHANNEL_RC_OK)
@@ -203,7 +216,7 @@ UINT xf_OutputExpose(xfContext* xfc, UINT32 x, UINT32 y, UINT32 width, UINT32 he
 		free(pSurfaceIds);
 		return CHANNEL_RC_OK;
 	}
-	for (index = 0; index < count; index++)
+	for (UINT32 index = 0; index < count; index++)
 	{
 		RECTANGLE_16 surfaceRect = { 0 };
 		xfGfxSurface* surface = (xfGfxSurface*)context->GetSurfaceData(context, pSurfaceIds[index]);
@@ -211,10 +224,12 @@ UINT xf_OutputExpose(xfContext* xfc, UINT32 x, UINT32 y, UINT32 width, UINT32 he
 		if (!surface || (!surface->gdi.outputMapped && !surface->gdi.windowMapped))
 			continue;
 
-		surfaceRect.left = surface->gdi.outputOriginX;
-		surfaceRect.top = surface->gdi.outputOriginY;
-		surfaceRect.right = surface->gdi.outputOriginX + surface->gdi.outputTargetWidth;
-		surfaceRect.bottom = surface->gdi.outputOriginY + surface->gdi.outputTargetHeight;
+		surfaceRect.left = WINPR_ASSERTING_INT_CAST(UINT16, surface->gdi.outputOriginX);
+		surfaceRect.top = WINPR_ASSERTING_INT_CAST(UINT16, surface->gdi.outputOriginY);
+		surfaceRect.right = WINPR_ASSERTING_INT_CAST(UINT16, surface->gdi.outputOriginX +
+		                                                         surface->gdi.outputTargetWidth);
+		surfaceRect.bottom = WINPR_ASSERTING_INT_CAST(UINT16, surface->gdi.outputOriginY +
+		                                                          surface->gdi.outputTargetHeight);
 
 		if (rectangles_intersection(&invalidRect, &surfaceRect, &intersection))
 		{
@@ -251,7 +266,7 @@ static UINT32 x11_pad_scanline(UINT32 scanline, UINT32 inPad)
 			scanline += pad;
 	}
 
-	/* 16 byte alingment is required for ASM optimized code */
+	/* 16 byte alignment is required for ASM optimized code */
 	if (scanline % 16)
 		scanline += 16 - scanline % 16;
 
@@ -267,8 +282,8 @@ static UINT xf_CreateSurface(RdpgfxClientContext* context,
                              const RDPGFX_CREATE_SURFACE_PDU* createSurface)
 {
 	UINT ret = CHANNEL_RC_NO_MEMORY;
-	size_t size;
-	xfGfxSurface* surface;
+	size_t size = 0;
+	xfGfxSurface* surface = NULL;
 	rdpGdi* gdi = (rdpGdi*)context->custom;
 	xfContext* xfc = (xfContext*)gdi->context;
 	surface = (xfGfxSurface*)calloc(1, sizeof(xfGfxSurface));
@@ -280,7 +295,7 @@ static UINT xf_CreateSurface(RdpgfxClientContext* context,
 
 	if (!surface->gdi.codecs)
 	{
-		WLog_ERR(TAG, "%s: global GDI codecs aren't set", __FUNCTION__);
+		WLog_ERR(TAG, "global GDI codecs aren't set");
 		goto out_free;
 	}
 
@@ -303,20 +318,20 @@ static UINT xf_CreateSurface(RdpgfxClientContext* context,
 			break;
 
 		default:
-			WLog_ERR(TAG, "%s: unknown pixelFormat 0x%" PRIx32 "", __FUNCTION__,
-			         createSurface->pixelFormat);
+			WLog_ERR(TAG, "unknown pixelFormat 0x%" PRIx32 "", createSurface->pixelFormat);
 			ret = ERROR_INTERNAL_ERROR;
 			goto out_free;
 	}
 
 	surface->gdi.scanline = surface->gdi.width * FreeRDPGetBytesPerPixel(surface->gdi.format);
-	surface->gdi.scanline = x11_pad_scanline(surface->gdi.scanline, xfc->scanline_pad);
-	size = surface->gdi.scanline * surface->gdi.height * 1ULL;
+	surface->gdi.scanline = x11_pad_scanline(surface->gdi.scanline,
+	                                         WINPR_ASSERTING_INT_CAST(uint32_t, xfc->scanline_pad));
+	size = 1ull * surface->gdi.scanline * surface->gdi.height;
 	surface->gdi.data = (BYTE*)winpr_aligned_malloc(size, 16);
 
 	if (!surface->gdi.data)
 	{
-		WLog_ERR(TAG, "%s: unable to allocate GDI data", __FUNCTION__);
+		WLog_ERR(TAG, "unable to allocate GDI data");
 		goto out_free;
 	}
 
@@ -325,37 +340,38 @@ static UINT xf_CreateSurface(RdpgfxClientContext* context,
 	if (FreeRDPAreColorFormatsEqualNoAlpha(gdi->dstFormat, surface->gdi.format))
 	{
 		WINPR_ASSERT(xfc->depth != 0);
-		surface->image =
-		    XCreateImage(xfc->display, xfc->visual, xfc->depth, ZPixmap, 0,
-		                 (char*)surface->gdi.data, surface->gdi.mappedWidth,
-		                 surface->gdi.mappedHeight, xfc->scanline_pad, surface->gdi.scanline);
+		surface->image = XCreateImage(
+		    xfc->display, xfc->visual, WINPR_ASSERTING_INT_CAST(uint32_t, xfc->depth), ZPixmap, 0,
+		    (char*)surface->gdi.data, surface->gdi.mappedWidth, surface->gdi.mappedHeight,
+		    xfc->scanline_pad, WINPR_ASSERTING_INT_CAST(int, surface->gdi.scanline));
 	}
 	else
 	{
 		UINT32 width = surface->gdi.width;
 		UINT32 bytes = FreeRDPGetBytesPerPixel(gdi->dstFormat);
 		surface->stageScanline = width * bytes;
-		surface->stageScanline = x11_pad_scanline(surface->stageScanline, xfc->scanline_pad);
-		size = surface->stageScanline * surface->gdi.height * 1ULL;
+		surface->stageScanline = x11_pad_scanline(
+		    surface->stageScanline, WINPR_ASSERTING_INT_CAST(uint32_t, xfc->scanline_pad));
+		size = 1ull * surface->stageScanline * surface->gdi.height;
 		surface->stage = (BYTE*)winpr_aligned_malloc(size, 16);
 
 		if (!surface->stage)
 		{
-			WLog_ERR(TAG, "%s: unable to allocate stage buffer", __FUNCTION__);
+			WLog_ERR(TAG, "unable to allocate stage buffer");
 			goto out_free_gdidata;
 		}
 
 		ZeroMemory(surface->stage, size);
 		WINPR_ASSERT(xfc->depth != 0);
-		surface->image =
-		    XCreateImage(xfc->display, xfc->visual, xfc->depth, ZPixmap, 0, (char*)surface->stage,
-		                 surface->gdi.mappedWidth, surface->gdi.mappedHeight, xfc->scanline_pad,
-		                 surface->stageScanline);
+		surface->image = XCreateImage(
+		    xfc->display, xfc->visual, WINPR_ASSERTING_INT_CAST(uint32_t, xfc->depth), ZPixmap, 0,
+		    (char*)surface->stage, surface->gdi.mappedWidth, surface->gdi.mappedHeight,
+		    xfc->scanline_pad, WINPR_ASSERTING_INT_CAST(int, surface->stageScanline));
 	}
 
 	if (!surface->image)
 	{
-		WLog_ERR(TAG, "%s: an error occurred when creating the XImage", __FUNCTION__);
+		WLog_ERR(TAG, "an error occurred when creating the XImage");
 		goto error_surface_image;
 	}
 
@@ -366,7 +382,7 @@ static UINT xf_CreateSurface(RdpgfxClientContext* context,
 
 	if (context->SetSurfaceData(context, surface->gdi.surfaceId, (void*)surface) != CHANNEL_RC_OK)
 	{
-		WLog_ERR(TAG, "%s: an error occurred during SetSurfaceData", __FUNCTION__);
+		WLog_ERR(TAG, "an error occurred during SetSurfaceData");
 		goto error_set_surface_data;
 	}
 
@@ -393,7 +409,7 @@ static UINT xf_DeleteSurface(RdpgfxClientContext* context,
 {
 	rdpCodecs* codecs = NULL;
 	xfGfxSurface* surface = NULL;
-	UINT status;
+	UINT status = 0;
 	EnterCriticalSection(&context->mux);
 	surface = (xfGfxSurface*)context->GetSurfaceData(context, deleteSurface->surfaceId);
 
@@ -437,14 +453,14 @@ static UINT xf_UpdateWindowFromSurface(RdpgfxClientContext* context, gdiGfxSurfa
 	if (freerdp_settings_get_bool(gdi->context->settings, FreeRDP_RemoteApplicationMode))
 		return xf_AppUpdateWindowFromSurface(xfc, surface);
 
-	WLog_WARN(TAG, "[%s] function not implemented", __func__);
+	WLog_WARN(TAG, "function not implemented");
 	return CHANNEL_RC_OK;
 }
 
 void xf_graphics_pipeline_init(xfContext* xfc, RdpgfxClientContext* gfx)
 {
-	rdpGdi* gdi;
-	const rdpSettings* settings;
+	rdpGdi* gdi = NULL;
+	const rdpSettings* settings = NULL;
 	WINPR_ASSERT(xfc);
 	WINPR_ASSERT(gfx);
 
@@ -455,7 +471,7 @@ void xf_graphics_pipeline_init(xfContext* xfc, RdpgfxClientContext* gfx)
 
 	gdi_graphics_pipeline_init(gdi, gfx);
 
-	if (!settings->SoftwareGdi)
+	if (!freerdp_settings_get_bool(settings, FreeRDP_SoftwareGdi))
 	{
 		gfx->UpdateSurfaces = xf_UpdateSurfaces;
 		gfx->CreateSurface = xf_CreateSurface;
@@ -466,7 +482,7 @@ void xf_graphics_pipeline_init(xfContext* xfc, RdpgfxClientContext* gfx)
 
 void xf_graphics_pipeline_uninit(xfContext* xfc, RdpgfxClientContext* gfx)
 {
-	rdpGdi* gdi;
+	rdpGdi* gdi = NULL;
 
 	WINPR_ASSERT(xfc);
 

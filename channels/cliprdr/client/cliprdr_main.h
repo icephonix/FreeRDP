@@ -27,6 +27,7 @@
 #include <freerdp/svc.h>
 #include <freerdp/addin.h>
 #include <freerdp/channels/log.h>
+#include <freerdp/client/cliprdr.h>
 
 #define TAG CHANNELS_TAG("cliprdr.client")
 
@@ -48,8 +49,13 @@ typedef struct
 	BOOL fileClipNoFilePaths;
 	BOOL canLockClipData;
 	BOOL hasHugeFileSupport;
+	BOOL initialFormatListSent;
 } cliprdrPlugin;
 
 CliprdrClientContext* cliprdr_get_client_interface(cliprdrPlugin* cliprdr);
+UINT cliprdr_send_error_response(cliprdrPlugin* cliprdr, UINT16 type);
+
+extern const char type_FileGroupDescriptorW[];
+extern const char type_FileContents[];
 
 #endif /* FREERDP_CHANNEL_CLIPRDR_CLIENT_MAIN_H */
